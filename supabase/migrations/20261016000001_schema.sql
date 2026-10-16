@@ -5,7 +5,7 @@
 -- Modelo de instância única (uma oficina por projeto Supabase).
 -- NÃO é multiempresa: para atender várias oficinas no mesmo banco seria
 -- necessário adicionar `workshop_id` em todas as tabelas e políticas RLS
--- que isolem cada oficina. Veja docs/ARQUITETURA.md.
+-- que isolem cada oficina. Veja o README (Personalizando para outra oficina).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------

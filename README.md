@@ -226,7 +226,7 @@ Depois da entrega, o próprio proprietário ajusta tudo pelo painel.
 
 ## Status e limitações conhecidas
 
-- **Supabase em nuvem não configurado:** a organização Lume Studio já está no limite de 2 projetos gratuitos. Todo o sistema foi testado com o Supabase **local** (mesmas migrations). Para publicar, é preciso criar/liberar um projeto e seguir [Banco de dados](#banco-de-dados-supabase).
+- **Supabase em nuvem:** projeto `vertice-automotive` (ref `wvfrgfgkyejlvevqxlyy`, região `sa-east-1`, plano gratuito) criado com as migrations aplicadas. Para liberar a vaga gratuita, o projeto da barbearia foi **pausado** (pode ser reativado em até 90 dias pelo painel do Supabase, com os dados preservados). Ainda é preciso, no painel do Supabase: desativar novos cadastros, configurar Site URL/Redirect URLs e criar o primeiro administrador.
 - **Fotos demonstrativas** apontam para o Unsplash (licença livre) e devem ser substituídas por fotos reais pelo painel. Se uma imagem não carregar, o site exibe um fundo neutro da marca.
 - **Fotos de clientes:** arquivos enviados e não vinculados a um pedido (ex.: formulário abandonado) permanecem na pasta `pending/` do bucket privado; recomenda-se limpeza periódica pelo painel do Supabase.
 - O limite por IP depende do cabeçalho `x-forwarded-for` repassado pela infraestrutura do Supabase.
