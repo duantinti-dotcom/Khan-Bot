@@ -1,0 +1,2 @@
+-- Seed local intencionalmente vazio.
+-- O conteúdo inicial fica nas migrations; administradores são criados com scripts/create-admin.mjs.
