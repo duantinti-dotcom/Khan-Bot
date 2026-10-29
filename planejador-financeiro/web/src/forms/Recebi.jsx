@@ -3,7 +3,8 @@ import { useApp } from '../App.jsx';
 import { post } from '../api.js';
 import * as C from '@shared/calc.js';
 import { parts } from '@shared/dates.js';
-import { Modal, Field, MoneyInput, inputToCents, centsToInput, Seg, Alert, brl, useSubmit, useToast } from '../ui.jsx';
+import { Modal, Field, MoneyInput, inputToCents, centsToInput, Seg, Alert, brl, More, useSubmit, useToast } from '../ui.jsx';
+import { undoCreated } from './Gastei.jsx';
 
 export function AccountSelect({ value, onChange, accounts, label = 'Conta', allowEmpty }) {
   return (
@@ -66,7 +67,7 @@ function SplitStep({ income, onClose }) {
       {goals.map((g) => <Field key={g.id} label={`Meta: ${g.name}`}><MoneyInput value={metas[g.id]} onChange={(v) => setMetas((x) => ({ ...x, [g.id]: v }))} /></Field>)}
       <div className="calc"><div className="ln"><span>Livre para gastar</span><b className={`num ${livre < 0 ? 'bad' : ''}`}>{brl(livre)}</b></div></div>
       {s.error && <p className="err">{s.error}</p>}
-      <div className="row"><button className="btn" onClick={onClose}>Não separar agora</button><div className="spacer" /><button className="btn primary" disabled={s.busy || livre < 0} onClick={() => s.run().catch(() => {})}>Confirmar separação</button></div>
+      <div className="form-actions"><button className="btn" onClick={onClose}>Não separar agora</button><button className="btn primary" disabled={s.busy || livre < 0} onClick={() => s.run().catch(() => {})}>Confirmar separação</button></div>
     </div>
   );
 }
@@ -93,49 +94,53 @@ export default function Recebi({ onClose }) {
     if (!account) throw new Error('Cadastre uma conta em "Meu dinheiro" primeiro.');
     if (status === 'realizado' && date > today) throw new Error('Se ainda não recebeu, marque como “previsto”.');
     const description = desc.trim() || null;
+    const created = {};
     if (rec) {
       const r = await post('/recurrences', { kind: 'receita', amount_cents: cents, description: description || 'Renda recorrente', frequency: freq, day_of_month: freq === 'mensal' ? Number(day) || parts(date).d : null, start_date: date, account_id: account, is_main_income: false });
+      created.recurrence = r.id;
       if (status === 'realizado') {
         const occ = C.occurrenceDates({ frequency: freq, start_date: date, day_of_month: Number(day) || parts(date).d }, date, date)[0];
         if (occ) await post(`/recurrences/${r.id}/occurrence`, { occurrence_date: occ, action: 'realizar', date });
-        else await post('/transactions', { kind: 'receita', amount_cents: cents, date, account_id: account, status: 'realizado', description });
+        else created.tx = [(await post('/transactions', { kind: 'receita', amount_cents: cents, date, account_id: account, status: 'realizado', description })).id];
       }
     } else {
-      await post('/transactions', { kind: 'receita', amount_cents: cents, date, account_id: account, status, description });
+      created.tx = [(await post('/transactions', { kind: 'receita', amount_cents: cents, date, account_id: account, status, description })).id];
     }
     await reload();
     setCount((n) => n + 1);
+    const undo = { label: 'Desfazer', run: () => undoCreated(created, reload) };
     if (again) {
-      toast(`${brl(cents)} registrados.`);
+      toast({ text: `${brl(cents)} registrados.`, ok: true, action: undo });
       setAmount(''); setDesc('');
       return;
     }
-    if (status === 'realizado') setSplit({ amount_cents: cents, account_id: account });
-    else { toast('Entrada prevista registrada. Ela não conta no saldo até você confirmar.'); onClose(); }
+    if (status === 'realizado') { toast({ text: `${brl(cents)} entraram no saldo.`, ok: true, action: undo }); setSplit({ amount_cents: cents, account_id: account }); }
+    else { toast({ text: 'Recebimento previsto registrado. Só entra no saldo quando você confirmar.', ok: true, action: undo }); onClose(); }
   });
 
   if (!accounts.length) {
-    return <Modal title="Recebi dinheiro" onClose={onClose}><p>Cadastre primeiro onde guarda seu dinheiro.</p><a className="btn primary" href="#/dinheiro" onClick={onClose}>Ir para Meu dinheiro</a></Modal>;
+    return <Modal title="Recebi dinheiro" onClose={onClose}><p>Cadastre primeiro onde guarda seu dinheiro.</p><a className="btn primary" href="#/perfil/contas" onClick={onClose}>Cadastrar conta</a></Modal>;
   }
   return (
-    <Modal title={split ? 'Dividir o que entrou' : 'Recebi dinheiro'} onClose={onClose}>
+    <Modal title={split ? 'Dividir o que entrou' : 'Entrada'} onClose={onClose}>
       {split ? <SplitStep income={split} onClose={onClose} /> : (
         <form className="stack" onSubmit={(e) => { e.preventDefault(); s.run(false).catch(() => {}); }}>
-          <MoneyInput huge value={amount} onChange={setAmount} autoFocus />
+          <Field label="Quanto?"><MoneyInput huge value={amount} onChange={setAmount} autoFocus /></Field>
           <Seg value={status} onChange={setStatus} label="Situação" options={[['realizado', 'Já recebi'], ['previsto', 'Ainda vou receber']]} />
-          <div className="form-grid">
-            <Field label="Data"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={status === 'realizado' ? today : undefined} /></Field>
-            <AccountSelect value={account} onChange={setAccount} accounts={accounts} label="Entrou em" />
-            <Field label="Origem" full><input className="input" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex.: mesada, Pix da avó, venda, freela" /></Field>
-            <label className="check full"><input type="checkbox" checked={rec} onChange={(e) => setRec(e.target.checked)} />Se repete (renda recorrente)</label>
-            {rec && <FrequencyFields freq={freq} setFreq={setFreq} day={day} setDay={setDay} />}
-          </div>
-          {status === 'previsto' && <p className="hint">Entradas previstas aparecem separadas e nunca viram dinheiro liberado para gastar.</p>}
+          <p className="hint" style={{ marginTop: -4 }}>{status === 'realizado' ? 'Entra no saldo agora.' : 'Fica em “a receber” e não conta como dinheiro para gastar até você confirmar.'}</p>
+          <Field label="De onde veio?"><input className="input" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Ex.: mesada, Pix da avó, venda" /></Field>
+          <More label="Mais opções (data, conta, se repete)">
+            <div className="form-grid">
+              <Field label="Data"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={status === 'realizado' ? today : undefined} /></Field>
+              <AccountSelect value={account} onChange={setAccount} accounts={accounts} label="Entrou em" />
+            </div>
+            <label className="check"><input type="checkbox" checked={rec} onChange={(e) => setRec(e.target.checked)} />Se repete (renda fixa: entra regularmente)</label>
+            {rec && <div className="form-grid"><FrequencyFields freq={freq} setFreq={setFreq} day={day} setDay={setDay} /></div>}
+          </More>
           {s.error && <p className="err" role="alert">{s.error}</p>}
           {count > 0 && <p className="hint ok">{count} entrada(s) registrada(s) nesta janela.</p>}
-          <div className="row wrap">
-            <button type="button" className="btn" disabled={s.busy} onClick={() => s.run(true).catch(() => {})}>Salvar e registrar outra</button>
-            <div className="spacer" />
+          <div className="form-actions">
+            <button type="button" className="btn" disabled={s.busy} onClick={() => s.run(true).catch(() => {})}>Salvar e outra</button>
             <button className="btn primary" disabled={s.busy}>{s.busy ? 'Salvando…' : 'Salvar'}</button>
           </div>
         </form>

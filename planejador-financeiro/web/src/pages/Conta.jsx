@@ -60,7 +60,6 @@ export default function Conta() {
 
   return (
     <>
-      <div className="topbar"><div><h1>Minha conta</h1><div className="hello">Usuário: {data.user.username}</div></div><button className="btn" onClick={logout}>Sair</button></div>
       <div className="grid two">
         <section className="card">
           <h2>Seus dados</h2>

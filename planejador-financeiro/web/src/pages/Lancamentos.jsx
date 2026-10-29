@@ -306,7 +306,7 @@ function Recurring() {
   );
 }
 
-function Installments() {
+export function Installments() {
   const { data, today } = useApp();
   const [edit, setEdit] = useState(null);
   const groups = new Map();

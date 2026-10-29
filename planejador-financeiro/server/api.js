@@ -8,6 +8,7 @@ import {
 } from './crypto.js';
 import { todayISO, addDays } from '../shared/dates.js';
 import { splitProportional } from '../shared/money.js';
+import { spendable } from '../shared/calc.js';
 
 const SESSION_DAYS = 30;
 const LOGIN_WINDOW_MIN = 15;
@@ -285,17 +286,19 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
           archived, created_at, updated_at FROM fin.accounts WHERE user_id = ${userId} ORDER BY created_at`,
       sql`SELECT id, name, color, icon, monthly_limit_cents, essential, archived, sort FROM fin.categories WHERE user_id = ${userId} ORDER BY sort, name`,
       sql`SELECT id, kind, amount_cents, account_id, category_id, description, frequency, day_of_month, start_date, end_date,
-          active, is_main_income, note, created_at FROM fin.recurrences WHERE user_id = ${userId} ORDER BY created_at`,
+          active, is_main_income, estimated, note, created_at FROM fin.recurrences WHERE user_id = ${userId} ORDER BY created_at`,
       sql`SELECT id, kind, amount_cents, date, account_id, to_account_id, category_id, description, status, recurrence_id,
           occurrence_date, installment_group, installment_no, installment_total, refund_of, note, created_at, updated_at
           FROM fin.transactions WHERE user_id = ${userId} ORDER BY date DESC, created_at DESC`,
       sql`SELECT id, kind, name, target_cents, priority, target_type, target_age, target_date, real_terms, plan_amount_cents,
-          plan_frequency, plan_day, place_account_id, place_note, note, baseline_cents, created_on AS created_at, archived
+          plan_frequency, plan_day, place_account_id, place_note, note, baseline_cents, created_on AS created_at, created_at AS created_ts, archived
           FROM fin.goals WHERE user_id = ${userId} ORDER BY priority, created_at`,
       sql`SELECT id, goal_id, account_id, amount_cents, date, source, note, created_at FROM fin.contributions
           WHERE user_id = ${userId} ORDER BY date, created_at`,
     ]);
-    return { profile, accounts, categories, recurrences, transactions, goals, contributions };
+    const [plan] = await sql`SELECT id, period_start, period_end, available_cents, items, created_at FROM fin.budget_plans
+      WHERE user_id = ${userId} AND active ORDER BY created_at DESC LIMIT 1`;
+    return { profile, accounts, categories, recurrences, transactions, goals, contributions, plan: plan || null };
   }
 
   async function getData(req, user) {
@@ -639,6 +642,67 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
     });
   }
 
+
+  // Salva uma distribuição do dinheiro ("Organizar meu dinheiro"). É só planejamento: não cria
+  // despesa nem desconta saldo. O servidor recalcula o dinheiro disponível com o mesmo código do app
+  // e recusa distribuições que passem dele.
+  async function savePlan(req, user) {
+    const b = await body(req);
+    if (!Array.isArray(b.items) || b.items.length > 200) throw new HttpError(400, 'Itens inválidos.');
+    const items = b.items.map((it) => pick(it, {
+      type: [T.enum('categoria', 'meta')], ref_id: [T.uuid()], amount_cents: [T.int(0, 1e11)], locked: [T.bool()],
+    }, { required: ['type', 'ref_id', 'amount_cents'] }));
+    const seen = new Set();
+    for (const it of items) {
+      const k = `${it.type}|${it.ref_id}`;
+      if (seen.has(k)) throw new HttpError(400, 'Item repetido no plano.');
+      seen.add(k);
+      it.locked = !!it.locked;
+    }
+    let row;
+    await sql.begin(async (tx) => {
+      await lockUser(tx, user.id);
+      const catIds = items.filter((i) => i.type === 'categoria').map((i) => i.ref_id);
+      const goalIds = items.filter((i) => i.type === 'meta').map((i) => i.ref_id);
+      if (catIds.length) {
+        const ok = await tx`SELECT count(*)::int AS n FROM fin.categories WHERE user_id = ${user.id} AND id IN ${tx(catIds)}`;
+        if (ok[0].n !== catIds.length) throw new HttpError(400, 'Categoria inválida no plano.');
+      }
+      if (goalIds.length) {
+        const ok = await tx`SELECT count(*)::int AS n FROM fin.goals WHERE user_id = ${user.id} AND id IN ${tx(goalIds)}`;
+        if (ok[0].n !== goalIds.length) throw new HttpError(400, 'Meta inválida no plano.');
+      }
+      const state = await loadAll(user.id);
+      const sp = spendable(state, today(), { includePlanned: false });
+      const available = Math.max(0, sp.livre);
+      const total = items.reduce((s, i) => s + i.amount_cents, 0);
+      if (total > available) {
+        throw new HttpError(409, `A distribuição (${brl(total)}) passa do dinheiro disponível (${brl(available)}).`, { code: 'PLAN_EXCEEDS', available, total });
+      }
+      await tx`UPDATE fin.budget_plans SET active = false WHERE user_id = ${user.id} AND active`;
+      [row] = await tx`INSERT INTO fin.budget_plans (user_id, period_start, period_end, available_cents, items)
+        VALUES (${user.id}, ${today()}, ${sp.period.end < today() ? today() : sp.period.end}, ${available}, ${tx.json(items)})
+        RETURNING id, available_cents`;
+    });
+    return json(row, 201);
+  }
+
+  async function discardPlan(req, user) {
+    await sql`UPDATE fin.budget_plans SET active = false WHERE user_id = ${user.id} AND active`;
+    return json({ ok: true });
+  }
+
+  async function reorderCategories(req, user) {
+    const b = await body(req);
+    if (!Array.isArray(b.ids) || b.ids.length > 300 || !b.ids.every(isUUID)) throw new HttpError(400, 'Lista inválida.');
+    await sql.begin(async (tx) => {
+      for (const [i, id] of b.ids.entries()) {
+        await tx`UPDATE fin.categories SET sort = ${i} WHERE id = ${id} AND user_id = ${user.id}`;
+      }
+    });
+    return json({ ok: true });
+  }
+
   // ------------------------------------------------------------ roteamento
 
   async function route(req) {
@@ -664,6 +728,9 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
     if (path === '/export' && m === 'GET') return exportData(req, user);
     if (path === '/profile' && m === 'PUT') return updateProfile(req, user);
     if (path === '/transactions/installments' && m === 'POST') return installments(req, user);
+    if (path === '/plans' && m === 'POST') return savePlan(req, user);
+    if (path === '/plans/active' && m === 'DELETE') return discardPlan(req, user);
+    if (path === '/categories/order' && m === 'PUT') return reorderCategories(req, user);
 
     let mm = path.match(/^\/recurrences\/([^/]+)\/(occurrence|split)$/);
     if (mm && m === 'POST') {

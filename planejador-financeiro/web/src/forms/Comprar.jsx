@@ -2,12 +2,17 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
 import * as C from '@shared/calc.js';
 import { formatBR } from '@shared/dates.js';
-import { Modal, MoneyInput, inputToCents, brl, Alert } from '../ui.jsx';
+import { Modal, MoneyInput, inputToCents, brl, Alert, Field } from '../ui.jsx';
+import * as B from '@shared/budget.js';
+import { CategoryPicker } from './Gastei.jsx';
 
 // Simulação pura: nada é gravado.
 export default function Comprar({ onClose }) {
   const { data, today, open } = useApp();
   const [amount, setAmount] = useState('');
+  const [cat, setCat] = useState(null);
+  const usage = useMemo(() => B.budgetUsage(data, data.plan), [data]);
+  const bi = cat && usage?.items.find((i) => i.type === 'categoria' && i.ref_id === cat);
   const cents = inputToCents(amount) || 0;
   const r = useMemo(() => (cents > 0 ? C.canIBuy(data, today, cents) : null), [data, today, cents]);
   const verdict = r && {
@@ -21,6 +26,7 @@ export default function Comprar({ onClose }) {
       <div className="stack">
         <p className="muted">Digite o valor. É só uma simulação — nada é registrado.</p>
         <MoneyInput huge value={amount} onChange={setAmount} autoFocus />
+        <Field label="Categoria (opcional, para ver o orçamento)"><CategoryPicker value={cat} onChange={setCat} categories={data.categories.filter((c) => !c.archived)} /></Field>
         {r && (
           <>
             <Alert tone={verdict[0]}><b>{verdict[1]}</b></Alert>
@@ -43,7 +49,8 @@ export default function Comprar({ onClose }) {
             {r.goalImpact && (
               <p className="hint">Impacto estimado na meta “{r.goalImpact.name}”: esse valor equivale a {Math.round(r.goalImpact.shareOfRemaining * 1000) / 10}% do que falta{r.goalImpact.delayDays ? `, ou cerca de ${r.goalImpact.delayDays} dia(s) de aportes no seu ritmo` : ''}.</p>
             )}
-            <button className="btn" onClick={() => open('gastei')}>Comprei — registrar gasto</button>
+            {cat && (bi ? <p>No seu plano, “{bi.name}” tem {brl(bi.left)} restantes; depois da compra ficariam <b className={bi.left - cents < 0 ? 'bad' : ''}>{brl(bi.left - cents)}</b>.</p> : <p className="hint">Essa categoria não está no seu plano atual.</p>)}
+            <button className="btn" onClick={() => open('gastei', { amount: cents })}>Comprei — registrar gasto</button>
           </>
         )}
       </div>

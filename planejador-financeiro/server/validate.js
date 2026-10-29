@@ -89,7 +89,7 @@ export const SPECS = {
     kind: [T.enum('receita', 'despesa')], amount_cents: [T.int(1, MAX_CENTS)], account_id: [T.uuid(), true],
     category_id: [T.uuid(), true], description: [T.str(1, 80)], frequency: [T.enum('semanal', 'quinzenal', 'mensal', 'anual')],
     day_of_month: [T.int(1, 31), true], start_date: [T.date()], end_date: [T.date(), true], active: [T.bool()],
-    is_main_income: [T.bool()], note: [T.str(0, 500), true],
+    is_main_income: [T.bool()], note: [T.str(0, 500), true], estimated: [T.bool()],
   },
   transactions: {
     kind: [T.enum('receita', 'despesa', 'transferencia', 'reembolso')], amount_cents: [T.int(1, MAX_CENTS)],

@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../App.jsx';
 import { post } from '../api.js';
 import * as C from '@shared/calc.js';
-import { Modal, Field, MoneyInput, inputToCents, Seg, brl, useSubmit, useToast, Alert } from '../ui.jsx';
+import { Modal, Field, MoneyInput, inputToCents, centsToInput, Seg, brl, useSubmit, useToast, Alert } from '../ui.jsx';
 import { AccountSelect } from './Recebi.jsx';
 import { withAllocCheck } from '../actions.js';
 
-export default function Guardei({ onClose, goalId }) {
+export default function Guardei({ onClose, goalId, amount: initialAmount }) {
   const { data, today, reload } = useApp();
   const toast = useToast();
   const goals = data.goals.filter((g) => !g.archived);
@@ -14,7 +14,7 @@ export default function Guardei({ onClose, goalId }) {
   const alloc = useMemo(() => C.allocations(data), [data]);
   const [mode, setMode] = useState('aporte');
   const [goal, setGoal] = useState(goalId || goals[0]?.id);
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(initialAmount ? centsToInput(initialAmount) : '');
   const [from, setFrom] = useState((list.find((a) => a.purpose === 'gastar') || list[0])?.id);
   const [moved, setMoved] = useState(false);
   const [to, setTo] = useState(list.find((a) => a.purpose !== 'gastar')?.id || list[0]?.id);
@@ -46,7 +46,7 @@ export default function Guardei({ onClose, goalId }) {
 
   if (!goals.length) return <Modal title="Guardei" onClose={onClose}><p>Crie uma meta primeiro.</p><a className="btn primary" href="#/metas" onClick={onClose}>Ir para Minhas metas</a></Modal>;
   return (
-    <Modal title={mode === 'resgate' ? 'Retirar de uma meta' : 'Guardei para uma meta'} onClose={onClose}>
+    <Modal title={mode === 'resgate' ? 'Retirar de uma meta' : 'Guardar para uma meta'} onClose={onClose}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); s.run().catch(() => {}); }}>
         <Seg value={mode} onChange={setMode} label="Operação" options={[['aporte', 'Guardar'], ['resgate', 'Retirar']]} />
         <MoneyInput huge value={amount} onChange={setAmount} autoFocus />
@@ -65,7 +65,7 @@ export default function Guardei({ onClose, goalId }) {
         )}
         <Field label="Observação (opcional)"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         {s.error && <p className="err" role="alert">{s.error}</p>}
-        <button className="btn primary block" disabled={s.busy}>{s.busy ? 'Salvando…' : 'Confirmar'}</button>
+        <div className="form-actions"><button className="btn primary" disabled={s.busy}>{s.busy ? 'Salvando…' : 'Confirmar'}</button></div>
       </form>
     </Modal>
   );

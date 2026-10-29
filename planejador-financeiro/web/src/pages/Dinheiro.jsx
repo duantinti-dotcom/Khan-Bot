@@ -96,9 +96,9 @@ export default function Dinheiro() {
   const archived = data.accounts.filter((a) => a.archived);
   return (
     <>
-      <div className="topbar">
-        <h1>Meu dinheiro</h1>
-        <div className="row"><button className="btn" onClick={() => open('transferir')}>⇄ Transferir</button><button className="btn primary" onClick={() => setForm({})}>+ Adicionar</button></div>
+      <div className="row wrap" style={{ marginBottom: 14 }}>
+        <button className="btn primary" onClick={() => setForm({})}>+ Adicionar conta</button>
+        <button className="btn" onClick={() => open('transferir')}>⇄ Transferir</button>
       </div>
       <Alert tone="info">Os saldos são <b>manuais</b>: o app não se conecta ao banco e nunca pede sua senha bancária. Atualize quando conferir no app do banco.</Alert>
       <div className="kpis" style={{ marginBottom: 18 }}>

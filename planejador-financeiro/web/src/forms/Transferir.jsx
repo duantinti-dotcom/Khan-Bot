@@ -56,7 +56,7 @@ export default function Transferir({ onClose, fromId }) {
           </Field>
         )}
         {s.error && <p className="err" role="alert">{s.error}</p>}
-        <button className="btn primary block" disabled={s.busy}>Transferir</button>
+        <div className="form-actions"><button className="btn primary" disabled={s.busy}>Transferir</button></div>
       </form>
     </Modal>
   );

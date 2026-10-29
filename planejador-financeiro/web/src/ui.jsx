@@ -185,11 +185,82 @@ export function GoalChart({ points, target, deadline, start }) {
 
 // ---------------------------------------------------------------- avisos rápidos e async
 
+// Número que anima ao mudar (desligado com movimento reduzido).
+export function AnimatedMoney({ c, className = '' }) {
+  const [shown, setShown] = useState(c);
+  const prev = useRef(c);
+  useEffect(() => {
+    const from = prev.current;
+    prev.current = c;
+    if (from === c || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setShown(c); return; }
+    let raf;
+    const t0 = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / 450);
+      const e = 1 - Math.pow(1 - k, 3);
+      setShown(Math.round(from + (c - from) * e));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [c]);
+  return <span className={`num ${className}`}>{formatBRL(shown)}</span>;
+}
+
+// Um dos números principais, com explicação curta ao tocar no "?".
+export function Tile({ label, value, sub, explain, tone, main, wide }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <section className={`tile ${main ? 'main' : ''} ${wide ? 'wide' : ''}`} aria-labelledby={`${id}-l`}>
+      <div className="lbl">
+        <span id={`${id}-l`}>{label}</span>
+        <button className="info-btn" aria-expanded={open} aria-controls={`${id}-e`} aria-label={`O que é “${label}”?`} onClick={() => setOpen(!open)}>?</button>
+      </div>
+      <div className={`val ${tone || ''}`}><AnimatedMoney c={value} /></div>
+      {sub && <div className="sub">{sub}</div>}
+      {open && <div className="explain" id={`${id}-e`}>{explain}</div>}
+    </section>
+  );
+}
+
+export function More({ label = 'Mais opções', children, open }) {
+  return <details className="more" open={open}><summary>{label}</summary><div className="inner">{children}</div></details>;
+}
+
+export function EmptyCta({ icon, title, text, action }) {
+  return (
+    <div className="card empty-cta">
+      <div className="big" aria-hidden="true">{icon}</div>
+      <h3>{title}</h3>
+      {text && <p className="muted">{text}</p>}
+      {action}
+    </div>
+  );
+}
+
 const ToastCtx = createContext(() => {});
+// Aviso rápido. `toast('Salvo')` ou `toast({ text, ok: true, action: { label: 'Desfazer', run } })`.
 export function ToastProvider({ children }) {
   const [msg, setMsg] = useState(null);
-  const show = useCallback((m) => { setMsg(m); setTimeout(() => setMsg((x) => (x === m ? null : x)), 3200); }, []);
-  return <ToastCtx.Provider value={show}>{children}{msg && <div className="toast" role="status">{msg}</div>}</ToastCtx.Provider>;
+  const show = useCallback((m) => {
+    const t = typeof m === 'string' ? { text: m } : m;
+    const id = Math.random();
+    setMsg({ ...t, id });
+    setTimeout(() => setMsg((x) => (x?.id === id ? null : x)), t.action ? 7000 : 3200);
+  }, []);
+  return (
+    <ToastCtx.Provider value={show}>
+      {children}
+      {msg && (
+        <div className="toast" role="status">
+          {msg.ok && <span className="ok-check" aria-hidden="true">✓</span>}
+          <span>{msg.text}</span>
+          {msg.action && <button className="btn small" onClick={async () => { setMsg(null); await msg.action.run(); }}>{msg.action.label}</button>}
+        </div>
+      )}
+    </ToastCtx.Provider>
+  );
 }
 export const useToast = () => useContext(ToastCtx);
 

@@ -53,7 +53,6 @@ export default function Aprender() {
   });
   return (
     <>
-      <div className="topbar"><h1>Onde guardar e investir</h1></div>
       <Alert tone="info">Conteúdo educativo, não é recomendação de investimento. O app não mostra rentabilidades atuais e não garante ganhos. Confira as condições de cada produto na instituição antes de decidir.</Alert>
 
       <section className="card section">

@@ -9,13 +9,24 @@ import * as C from '../shared/calc.js';
 import { addDays } from '../shared/dates.js';
 
 const DB = process.env.TEST_DATABASE_URL;
-let sql, handle, TODAY;
+let sql, handle, TODAY, MIGRATED;
 
 before(async () => {
   if (!DB) return;
   sql = postgres(DB, { types: PG_TYPES, onnotice: () => {} });
   await sql.unsafe('DROP SCHEMA IF EXISTS fin CASCADE');
-  await sql.unsafe(await readFile(new URL('../server/schema.sql', import.meta.url), 'utf8'));
+  // Simula o banco em produção: aplica a migração 001, grava dados antigos e só então aplica a 002 (duas vezes).
+  const mig = (n) => readFile(new URL(`../server/migrations/${n}`, import.meta.url), 'utf8');
+  await sql.unsafe(await mig('001_esquema_inicial.sql'));
+  const [u] = await sql`INSERT INTO fin.users (username, username_lower, pass_hash) VALUES ('Antigo', 'antigo', 'x') RETURNING id`;
+  await sql`INSERT INTO fin.profiles (user_id) VALUES (${u.id})`;
+  const [a] = await sql`INSERT INTO fin.accounts (user_id, name, kind, purpose, liquidity, initial_cents) VALUES (${u.id}, 'C', 'corrente', 'gastar', 'imediata', 12345) RETURNING id`;
+  await sql`INSERT INTO fin.recurrences (user_id, kind, amount_cents, description, frequency, day_of_month, start_date, account_id) VALUES (${u.id}, 'despesa', 999, 'Spotify', 'mensal', 10, '2026-10-01', ${a.id})`;
+  await sql`INSERT INTO fin.transactions (user_id, kind, amount_cents, date, account_id, status) VALUES (${u.id}, 'receita', 500, '2026-10-01', ${a.id}, 'realizado')`;
+  await sql.unsafe(await mig('002_orcamento_e_estimativas.sql'));
+  await sql.unsafe(await mig('002_orcamento_e_estimativas.sql'));
+  MIGRATED = await sql`SELECT (SELECT count(*)::int FROM fin.users) AS users, (SELECT initial_cents FROM fin.accounts) AS bal,
+    (SELECT estimated FROM fin.recurrences) AS est, (SELECT count(*)::int FROM fin.transactions) AS txs`;
   handle = createApi({ sql, secureCookies: true });
   TODAY = (await (await handle(new Request('http://x/api/health'))).json()).today;
 });
@@ -283,4 +294,85 @@ test('recuperação de acesso, troca de senha e exclusão da conta', { skip }, a
   const left = await sql`SELECT (SELECT count(*) FROM fin.users WHERE username_lower = 'esqueci')::int AS u`;
   assert.equal(left[0].u, 0);
   assert.equal((await anon.call('GET', '/data')).status, 401);
+});
+
+test('migração 002 preserva dados existentes e é idempotente', { skip }, async () => {
+  assert.deepEqual(MIGRATED[0], { users: 1, bal: 12345, est: false, txs: 1 });
+});
+
+test('categorias: criar, editar, reordenar e arquivar preservando histórico', { skip }, async () => {
+  const c = client('10.0.4.1');
+  await c.call('POST', '/auth/signup', { username: 'catuser', password: 'senha-cat-123' });
+  const acc = (await c.call('POST', '/accounts', { name: 'C', kind: 'corrente', purpose: 'gastar', liquidity: 'imediata', initial_cents: 10000 })).data.id;
+  const nova = await c.call('POST', '/categories', { name: 'Namorada', icon: '💖', color: '#ff66aa', monthly_limit_cents: 20000, essential: false });
+  assert.equal(nova.status, 201);
+  await c.call('POST', '/transactions', { kind: 'despesa', amount_cents: 1500, date: TODAY, account_id: acc, category_id: nova.data.id, status: 'realizado' });
+  assert.equal((await c.call('PUT', `/categories/${nova.data.id}`, { name: 'Namorada e passeios', color: '#22d3ee', icon: '🌹' })).status, 200);
+  let d = await state(c);
+  const ids = d.categories.map((x) => x.id).reverse();
+  assert.equal((await c.call('PUT', '/categories/order', { ids })).status, 200);
+  assert.equal((await c.call('PUT', `/categories/${nova.data.id}`, { archived: true })).status, 200);
+  d = await state(c);
+  assert.deepEqual(d.categories.map((x) => x.id), ids);
+  const cat = d.categories.find((x) => x.id === nova.data.id);
+  assert.equal(cat.archived, true);
+  assert.equal(cat.name, 'Namorada e passeios');
+  assert.equal(d.transactions[0].category_id, nova.data.id); // histórico mantido
+  // Outro usuário não reordena categorias alheias.
+  const o = client('10.0.4.2');
+  await o.call('POST', '/auth/signup', { username: 'catoutro', password: 'senha-cat-456' });
+  await o.call('PUT', '/categories/order', { ids: [nova.data.id] });
+  d = await state(c);
+  assert.deepEqual(d.categories.map((x) => x.id), ids);
+});
+
+test('várias rendas, despesas estimadas e confirmação de recebimento sem duplicar', { skip }, async () => {
+  const c = client('10.0.5.1');
+  await c.call('POST', '/auth/signup', { username: 'rendas', password: 'senha-rendas-1' });
+  const acc = (await c.call('POST', '/accounts', { name: 'C', kind: 'corrente', purpose: 'gastar', liquidity: 'imediata', initial_cents: 0 })).data.id;
+  const r1 = await c.call('POST', '/recurrences', { kind: 'receita', amount_cents: 40000, description: 'Mesada', frequency: 'mensal', day_of_month: Number(TODAY.slice(8)), start_date: TODAY, account_id: acc, is_main_income: true });
+  const r2 = await c.call('POST', '/recurrences', { kind: 'receita', amount_cents: 5000, description: 'Freela', frequency: 'semanal', start_date: TODAY, account_id: acc });
+  const r3 = await c.call('POST', '/recurrences', { kind: 'despesa', amount_cents: 8000, description: 'Celular', frequency: 'mensal', day_of_month: 20, start_date: TODAY, account_id: acc, estimated: true });
+  assert.equal(r1.status + r2.status + r3.status, 603);
+  let d = await state(c);
+  assert.equal(d.recurrences.filter((r) => r.kind === 'receita').length, 2);
+  assert.equal(d.recurrences.find((r) => r.id === r3.data.id).estimated, true);
+  // Recebimento previsto de hoje: confirmar duas vezes não duplica.
+  assert.equal((await c.call('POST', `/recurrences/${r1.data.id}/occurrence`, { occurrence_date: TODAY, action: 'realizar' })).status, 201);
+  assert.equal((await c.call('POST', `/recurrences/${r1.data.id}/occurrence`, { occurrence_date: TODAY, action: 'realizar' })).status, 409);
+  // Entrada avulsa prevista confirmada atualiza o mesmo registro.
+  const prev = await c.call('POST', '/transactions', { kind: 'receita', amount_cents: 2000, date: TODAY, account_id: acc, status: 'previsto', description: 'Pix' });
+  assert.equal((await c.call('PUT', `/transactions/${prev.data.id}`, { status: 'realizado' })).status, 200);
+  d = await state(c);
+  assert.equal(d.transactions.filter((t) => t.kind === 'receita').length, 2);
+  assert.equal(C.accountBalances(d).get(acc), 42000);
+});
+
+test('plano de distribuição: não passa do disponível, não desconta saldo, isolado por usuário', { skip }, async () => {
+  const c = client('10.0.6.1');
+  await c.call('POST', '/auth/signup', { username: 'planner', password: 'senha-plan-123' });
+  const acc = (await c.call('POST', '/accounts', { name: 'C', kind: 'corrente', purpose: 'gastar', liquidity: 'imediata', initial_cents: 30000 })).data.id;
+  let d = await state(c);
+  const cat = d.categories[0].id;
+  const over = await c.call('POST', '/plans', { items: [{ type: 'categoria', ref_id: cat, amount_cents: 30001 }] });
+  assert.equal(over.status, 409);
+  assert.equal(over.data.code, 'PLAN_EXCEEDS');
+  const ok = await c.call('POST', '/plans', { items: [{ type: 'categoria', ref_id: cat, amount_cents: 12000, locked: true }] });
+  assert.equal(ok.status, 201);
+  d = await state(c);
+  assert.equal(d.plan.items[0].amount_cents, 12000);
+  assert.equal(d.plan.available_cents, 30000);
+  assert.equal(C.accountBalances(d).get(acc), 30000); // plano não é despesa
+  // Substituir o plano desativa o anterior.
+  await c.call('POST', '/plans', { items: [{ type: 'categoria', ref_id: cat, amount_cents: 5000 }] });
+  d = await state(c);
+  assert.equal(d.plan.items[0].amount_cents, 5000);
+  // Outro usuário não pode usar categoria alheia nem vê o plano.
+  const o = client('10.0.6.2');
+  await o.call('POST', '/auth/signup', { username: 'planoutro', password: 'senha-plan-456' });
+  await o.call('POST', '/accounts', { name: 'C', kind: 'corrente', purpose: 'gastar', liquidity: 'imediata', initial_cents: 99999 });
+  assert.equal((await o.call('POST', '/plans', { items: [{ type: 'categoria', ref_id: cat, amount_cents: 1 }] })).status, 400);
+  assert.equal((await state(o)).plan, null);
+  assert.equal((await c.call('DELETE', '/plans/active')).status, 200);
+  assert.equal((await state(c)).plan, null);
 });

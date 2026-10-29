@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useApp } from '../App.jsx';
+import { useApp, TopBar } from '../App.jsx';
 import { post, put, del } from '../api.js';
 import * as C from '@shared/calc.js';
 import { formatBR, birthdayAtAge, describeDuration, ageOn, diffDays } from '@shared/dates.js';
@@ -228,10 +228,15 @@ export default function Metas() {
   const age = data.profile.birth_date ? ageOn(data.profile.birth_date, today) : null;
   return (
     <>
-      <div className="topbar">
-        <div><h1>Minhas metas</h1>{age != null && <div className="hello">Você tem {age} anos</div>}</div>
-        <button className="btn primary" onClick={() => setForm(true)}>+ Nova meta</button>
-      </div>
+      <TopBar title="Metas" subtitle={age != null ? `Você tem ${age} anos` : undefined}>
+        <button className="btn primary" onClick={() => setForm(true)}>+ Nova</button>
+      </TopBar>
+      {all.length > 0 && (
+        <div className="kpis" style={{ marginTop: 0, marginBottom: 16 }}>
+          <div className="kpi"><div className="l">Guardado nas metas</div><div className="v num">{brl(all.filter((m) => !m.goal.archived).reduce((s, m) => s + m.current, 0))}</div></div>
+          <div className="kpi"><div className="l">Falta guardar neste mês</div><div className="v num">{brl(all.filter((m) => !m.goal.archived && m.status !== 'vencida').reduce((s, m) => s + m.pendingThisMonth, 0))}</div></div>
+        </div>
+      )}
       {!data.profile.birth_date && data.goals.some((g) => g.target_type === 'idade') && <Alert tone="warn">Informe sua data de nascimento em <a href="#/conta">Minha conta</a> para calcular metas por idade.</Alert>}
       {!all.length && <div className="card"><Empty>Nenhuma meta ainda. Que tal “Quero ter R$10.000 quando completar 20 anos”? Cada pessoa define a sua.</Empty></div>}
       <div className="grid three">

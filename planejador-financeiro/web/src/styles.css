@@ -300,3 +300,159 @@ textarea.input { min-height: 80px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
+
+/* ===================== v2: interface simplificada ===================== */
+:root { --radius: 22px; --kb: 0px; }
+.page { animation: page-in 0.28s ease; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* Topo com perfil */
+.avatar {
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface2);
+  display: grid; place-items: center; font-weight: 700; cursor: pointer; color: var(--text); flex: none;
+}
+.avatar:hover { border-color: var(--accent); }
+
+/* Quatro números principais */
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 900px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; position: relative;
+}
+.tile.main { grid-column: 1 / -1; padding: 22px; box-shadow: var(--glow); }
+@media (min-width: 900px) { .tile.main { grid-column: auto; } }
+.tile .lbl { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-weight: 600; font-size: 0.92rem; }
+.tile .val { font-size: clamp(1.35rem, 5vw, 1.7rem); font-weight: 750; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.tile.main .val { font-size: clamp(2.1rem, 9vw, 2.6rem); }
+.tile .sub { font-size: 0.85rem; color: var(--muted); }
+.tile .explain { font-size: 0.9rem; color: var(--text); background: var(--surface2); border-radius: 12px; padding: 10px 12px; border: 1px solid var(--border); }
+.info-btn {
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-strong); background: none; color: var(--muted);
+  font-weight: 700; font-size: 0.85rem; cursor: pointer; flex: none;
+}
+.info-btn[aria-expanded='true'] { border-color: var(--accent); color: var(--accent); }
+.val.pos { color: var(--accent2); }
+.val.neg { color: var(--bad); }
+
+/* Lista de ações */
+.todo { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: var(--surface2); border: 1px solid var(--border); }
+.todo .grow { flex: 1; min-width: 0; }
+.todo .ico { font-size: 1.2rem; width: 28px; text-align: center; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 10px; gap: 10px; }
+.section-title h2 { font-size: 1.1rem; }
+
+/* Botão + */
+.fab {
+  position: fixed; right: 20px; bottom: 28px; z-index: 35; width: 64px; height: 64px; border-radius: 50%; border: 0;
+  background: var(--grad); color: var(--accent-ink); font-size: 2rem; font-weight: 600; cursor: pointer;
+  box-shadow: 0 12px 30px -10px rgba(34, 211, 238, 0.6); transition: transform 0.15s ease;
+}
+.fab:active { transform: scale(0.94); }
+.fab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (max-width: 860px) {
+  .tabbar { grid-template-columns: repeat(2, 1fr) 76px repeat(2, 1fr); align-items: end; }
+  .tabbar .tab-plus { display: grid; place-items: center; }
+  .tabbar .tab-plus button.fab { position: static; width: 58px; height: 58px; margin-bottom: 4px; font-size: 1.8rem; color: var(--accent-ink); }
+  .fab.floating { display: none; }
+}
+@media (min-width: 861px) { .tabbar .tab-plus { display: none; } }
+.new-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.new-grid .btn { min-height: 86px; flex-direction: column; gap: 4px; border-radius: 18px; font-size: 1rem; }
+.new-grid .btn .ico { font-size: 1.5rem; }
+.new-grid .btn small { font-weight: 500; color: var(--muted); font-size: 0.78rem; white-space: normal; text-align: center; }
+
+/* Detalhes recolhidos */
+details.more { border: 1px solid var(--border); border-radius: 14px; background: var(--surface2); }
+details.more > summary { cursor: pointer; padding: 12px 14px; font-weight: 600; color: var(--muted); list-style: none; display: flex; justify-content: space-between; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::after { content: '▾'; transition: transform 0.2s ease; }
+details.more[open] > summary::after { transform: rotate(180deg); }
+details.more > .inner { padding: 0 14px 14px; display: grid; gap: 14px; }
+
+/* Barra de ações fixa nos formulários (fica acima do teclado) */
+.form-actions {
+  position: sticky; bottom: calc(-20px - env(safe-area-inset-bottom)); margin: 8px -20px -20px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent, var(--surface-solid) 22%); display: flex; gap: 10px; z-index: 2;
+}
+.form-actions .btn { flex: 1; }
+.overlay { bottom: var(--kb); }
+.modal { max-height: calc(var(--vvh, 100dvh) - 32px); }
+@media (max-width: 560px) { .modal { max-height: calc(var(--vvh, 100dvh) - 12px); } }
+
+/* Toast com ação */
+.toast { display: flex; align-items: center; gap: 12px; }
+.toast .ok-check { width: 26px; height: 26px; border-radius: 50%; background: var(--grad); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800; animation: pop 0.35s ease; }
+@keyframes pop { 0% { transform: scale(0.4); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+/* Orçamento */
+.budget-row { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.budget-row:last-child { border-bottom: 0; }
+.budget-row .top { display: flex; align-items: center; gap: 10px; }
+.budget-row .name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper .btn { min-width: 44px; padding: 0; }
+.stepper .money-input { width: 140px; }
+.stepper .money-input .input { font-size: 1rem; min-height: 44px; }
+.lock { min-width: 44px; }
+.lock[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.sticky-sum {
+  position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); padding: 12px 0; margin-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+
+/* Assistente */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips .btn { white-space: normal; text-align: left; min-height: 44px; }
+.answer { border-left: 3px solid var(--accent); padding-left: 14px; }
+.answer .main { font-size: 1.15rem; font-weight: 650; }
+
+/* Menu do perfil */
+.menu { display: flex; flex-direction: column; gap: 8px; }
+.menu button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface); text-align: left; cursor: pointer; }
+.menu button:hover { border-color: var(--accent); }
+.menu .ico { font-size: 1.3rem; width: 32px; text-align: center; }
+.menu .grow { flex: 1; }
+.menu small { display: block; color: var(--muted); }
+
+/* Ícones e cores de categoria */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatches button { width: 36px; height: 36px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatches button[aria-pressed='true'] { border-color: var(--text); }
+.icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+.icons button { height: 44px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface2); font-size: 1.25rem; cursor: pointer; }
+.icons button[aria-pressed='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+/* Comemoração ao atingir meta */
+.celebrate { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; pointer-events: none; }
+.celebrate .card { pointer-events: auto; text-align: center; animation: pop 0.4s ease; max-width: 340px; }
+.celebrate i { position: absolute; top: 45%; left: 50%; width: 8px; height: 14px; border-radius: 2px; opacity: 0; animation: burst 1.3s ease-out forwards; }
+@keyframes burst { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(540deg); } }
+
+.empty-cta { text-align: center; padding: 28px 16px; display: grid; gap: 12px; justify-items: center; }
+.empty-cta .big { font-size: 2.2rem; }
+.tag { display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--border); color: var(--muted); vertical-align: middle; }
+.tabs-scroll { overflow-x: auto; margin-bottom: 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.tabs-scroll::-webkit-scrollbar { display: none; }
+.tabs-scroll .seg { flex-wrap: nowrap; }
+@media (prefers-reduced-motion: reduce) { .celebrate i { display: none; } }
+.bar > i { animation: bar-grow 0.8s cubic-bezier(.2,.8,.2,1); }
+@keyframes bar-grow { from { width: 0; } }
+/* Linhas com várias ações: os botões descem para a linha de baixo em telas estreitas. */
+.item.wrap-actions { flex-wrap: wrap; }
+.item.wrap-actions .grow { min-width: 150px; }
+.item.wrap-actions .actions { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.tabbar .tab-plus .fab { background: var(--grad); color: var(--accent-ink); border-radius: 50%; padding: 0; min-height: 0; display: grid; place-items: center; box-shadow: 0 10px 24px -10px rgba(34, 211, 238, 0.7); }
+.btn, .chip { max-width: 100%; }
+.chip { white-space: normal; }
+/* A coluna principal pode encolher; conteúdos largos (abas) rolam dentro do próprio contêiner. */
+.shell > * { min-width: 0; }
+.main, .page { min-width: 0; }
+.tabs-scroll { max-width: 100%; }
+/* Ao focar um campo ou rolar até um botão, ele não fica escondido atrás da barra inferior ou do resumo fixo. */
+html { scroll-padding-top: 140px; scroll-padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+.budget-row { grid-template-columns: minmax(0, 1fr); }
+.budget-row > * { min-width: 0; }
+.stack > * { min-width: 0; }
+@media (max-width: 400px) { .stepper .money-input { width: 112px; } }
+@media (max-width: 899px) { .tile.wide { grid-column: 1 / -1; } }

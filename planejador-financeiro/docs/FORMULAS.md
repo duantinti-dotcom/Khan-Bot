@@ -86,3 +86,33 @@ até 25% da média de cada uma.
 2. Reserva: 20% do restante se a reserva está abaixo de 50% do alvo, senão 10% (limitado ao que falta).
 3. Metas: aporte pendente do mês por prioridade, limitado a 50% do que sobrou.
 4. O resto fica livre. A pessoa revisa e confirma; nada é movimentado no banco.
+
+## Organizar meu dinheiro (`shared/budget.js`)
+
+```
+disponível = saldo nas contas de gasto − contas a pagar até a véspera da próxima renda − já separado para metas
+```
+
+Recebimentos previstos não entram. Para cada item:
+
+- Categoria: `necessário = gasto médio por dia × dias do período`. A média usa só gastos avulsos pagos
+  (contas fixas e parcelas já estão em "contas a pagar"), menos reembolsos, na janela de histórico (30–90 dias).
+  Sem histórico, usa o limite mensal da categoria × dias ÷ 30; sem limite, 0 (a pessoa define).
+- Meta/reserva: o aporte que falta no mês.
+
+Distribuição (sem percentuais fixos): primeiro os valores fixados pela pessoa; depois categorias essenciais
+(proporcional ao necessário se não couber), metas por prioridade e prazo, e categorias flexíveis
+(proporcional). O que sobra fica "livre". A soma nunca passa do disponível — o servidor recalcula o disponível
+e recusa um plano que passe dele. Quando não cabe tudo, cada item mostra quanto falta.
+
+O plano salvo é só planejamento: não desconta saldo nem vira despesa. Um gasto registrado depois do plano
+reduz o saldo uma vez e aparece como "usado" na categoria (`usado = gastos pagos − reembolsos criados após o plano`).
+O plano fica desatualizado quando o período termina, entra dinheiro, ou surgem contas ou metas novas; o app
+recalcula a sugestão, mas só substitui o plano depois da confirmação.
+
+## Outras visões
+
+- Saldo projetado (calendário): saldo atual das contas de gasto + recebimentos previstos − contas a pagar, dia a dia.
+  Fica separado do saldo atual.
+- Renda futura comprometida: contas a pagar ÷ recebimentos previstos nos próximos 30 dias.
+- Fim de semana (assistente): `min(livre, livre por dia × dias do fim de semana)`.

@@ -9,7 +9,7 @@ quanto posso gastar agora, quanto separar para as próximas contas e quanto guar
 |---|---|---|
 | Interface | React 18 + Vite (`web/`) | Vercel (site estático) |
 | API | `server/api.js` (Web `Request`/`Response`) | Supabase Edge Function `fin-api` (Deno) |
-| Banco | PostgreSQL, esquema isolado `fin` (`server/schema.sql`) | Supabase |
+| Banco | PostgreSQL, esquema isolado `fin` (`server/migrations/`, todas juntas em `server/schema.sql`) | Supabase |
 | Cálculos | `shared/calc.js` (puro, determinístico) | navegador e testes |
 
 O Vercel repassa `/api/*` para a Edge Function, então site e API ficam no mesmo domínio e a sessão usa cookie
@@ -38,7 +38,7 @@ npm run test:e2e -- http://localhost:8787 ./shots   # navegador (Playwright)
 
 ## Publicação
 
-1. Aplicar `server/schema.sql` no Postgres do Supabase.
+1. Banco novo: aplicar `server/schema.sql`. Banco existente: aplicar só as migrações novas de `server/migrations/` (são aditivas).
 2. Publicar `supabase/functions/fin-api` com `verify_jwt = false` (a função faz a própria autenticação).
    Ela usa a variável `SUPABASE_DB_URL`, já fornecida pelo Supabase.
 3. Publicar este diretório no Vercel (`vercel.json` define build e o repasse de `/api`).

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/calc.test.mjs tests/api.test.mjs",
+    "test": "node --test tests/calc.test.mjs tests/budget.test.mjs tests/api.test.mjs",
     "dev:api": "node dev/server.mjs",
     "build": "vite build web",
     "test:e2e": "node tests/e2e.mjs"
