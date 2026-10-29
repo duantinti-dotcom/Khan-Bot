@@ -1,0 +1,21 @@
+{
+  "name": "planejador-financeiro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/calc.test.mjs tests/api.test.mjs",
+    "dev:api": "node dev/server.mjs",
+    "build": "vite build web",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.5.2",
+    "postgres": "^3.4.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.3.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
