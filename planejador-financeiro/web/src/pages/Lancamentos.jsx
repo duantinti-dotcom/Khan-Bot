@@ -172,7 +172,7 @@ function History() {
           const c = cats.get(t.category_id);
           const sign = txSign(t);
           return (
-            <button key={t.id} className="item" style={{ background: 'none', border: 0, borderBottom: '1px solid var(--border)', textAlign: 'left', cursor: 'pointer', width: '100%' }} onClick={() => setEdit(t)}>
+            <button key={t.id} className="item" style={{ background: 'none', border: 0, borderBottom: '1px solid var(--line)', textAlign: 'left', cursor: 'pointer', width: '100%' }} onClick={() => setEdit(t)}>
               <div className="dot" aria-hidden="true">{t.kind === 'transferencia' ? '⇄' : t.kind === 'receita' ? '↓' : t.kind === 'ajuste' ? '≈' : c?.icon || '•'}</div>
               <div className="grow">
                 <div className="t">{t.description || c?.name || KIND_LABEL[t.kind]}</div>
@@ -330,7 +330,7 @@ export function Installments() {
           const total = g.reduce((s, t) => s + t.amount_cents, 0);
           const next = g.find((t) => t.status === 'previsto');
           return (
-            <div key={g[0].installment_group} className="stack" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+            <div key={g[0].installment_group} className="stack" style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
               <div className="row between"><b>{g[0].description.replace(/ \(\d+\/\d+\)$/, '')}</b><span className="num">{brl(total)}</span></div>
               <Progress value={paid / g.length} />
               <div className="row between"><small>{paid}/{g.length} pagas</small>{next && <button className="btn small" onClick={() => setEdit(next)}>Próxima: {formatBR(next.date)} · {brl(next.amount_cents)}</button>}</div>

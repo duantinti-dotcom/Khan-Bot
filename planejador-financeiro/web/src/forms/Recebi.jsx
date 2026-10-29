@@ -3,7 +3,10 @@ import { useApp } from '../App.jsx';
 import { post } from '../api.js';
 import * as C from '@shared/calc.js';
 import { parts } from '@shared/dates.js';
-import { Modal, Field, MoneyInput, inputToCents, centsToInput, Seg, Alert, brl, More, useSubmit, useToast } from '../ui.jsx';
+import * as B from '@shared/budget.js';
+import { mergePlanItems } from '@shared/assistant.js';
+import { Modal, Field, MoneyInput, inputToCents, Seg, Alert, brl, More, SplitBar, useSubmit, useToast } from '../ui.jsx';
+import { soft } from '../budgetui.jsx';
 import { undoCreated } from './Gastei.jsx';
 
 export function AccountSelect({ value, onChange, accounts, label = 'Conta', allowEmpty }) {
@@ -30,44 +33,47 @@ export function FrequencyFields({ freq, setFreq, day, setDay }) {
   );
 }
 
+// Divide só o dinheiro novo: completa o que falta no plano (ou na sugestão), sem reservar de novo o que já estava separado.
 function SplitStep({ income, onClose }) {
-  const { data, today, reload } = useApp();
+  const { data, today, reload, go } = useApp();
   const toast = useToast();
   const acc = data.accounts.find((a) => a.id === income.account_id);
-  const sug = useMemo(() => C.suggestSplit(data, today, income.amount_cents, { countedInBase: acc?.purpose === 'gastar' ? income.amount_cents : 0 }), [data, today, income, acc]);
-  const goals = data.goals.filter((g) => !g.archived && g.kind !== 'reserva');
-  const [reserva, setReserva] = useState(centsToInput(sug.reserva));
-  const [metas, setMetas] = useState(() => Object.fromEntries(goals.map((g) => [g.id, centsToInput(sug.metas.find((m) => m.goal_id === g.id)?.amount || 0)])));
-  const rc = inputToCents(reserva) || 0;
-  const mc = Object.values(metas).reduce((s, v) => s + (inputToCents(v) || 0), 0);
-  const livre = income.amount_cents - sug.contas - rc - mc;
+  const counted = acc?.purpose === 'gastar' ? income.amount_cents : 0;
+  const r = useMemo(() => B.splitNewIncome(data, today, income.amount_cents, { alreadyCounted: counted }), [data, today, income, counted]);
+  const metaAdds = r.adds.filter((a) => a.type === 'meta');
+  const [separar, setSeparar] = useState(true);
+  const parts = [
+    ...(r.billGap ? [{ label: 'Contas', value: r.billGap, color: 'var(--warn)' }] : []),
+    ...r.adds.map((a) => ({ label: a.name, value: a.amount, color: a.type === 'meta' ? 'var(--accent)' : soft(data.categories.find((c) => c.id === a.id)?.color) })),
+    ...(r.livre > 0 ? [{ label: 'Livre', value: r.livre, color: 'var(--fill-strong)' }] : []),
+  ];
   const s = useSubmit(async () => {
-    if (livre < 0) throw new Error('A soma das separações passa do valor recebido.');
-    const items = [];
-    if (rc > 0 && sug.reserveGoal) items.push({ goal_id: sug.reserveGoal.id, account_id: income.account_id, amount_cents: rc, date: today, source: 'divisao' });
-    for (const [gid, v] of Object.entries(metas)) {
-      const c = inputToCents(v) || 0;
-      if (c > 0) items.push({ goal_id: gid, account_id: income.account_id, amount_cents: c, date: today, source: 'divisao' });
+    if (r.adds.length) await post('/plans', { items: mergePlanItems(r.planned, r.adds) });
+    if (separar && metaAdds.length) {
+      await post('/contributions', { items: metaAdds.map((a) => ({ goal_id: a.id, account_id: income.account_id, amount_cents: a.amount, date: today, source: 'divisao' })) });
     }
-    if (items.length) await post('/contributions', { items });
     await reload();
-    toast(items.length ? 'Separação registrada no seu planejamento.' : 'Tudo certo, nada separado.');
+    toast({ text: r.adds.length ? 'Plano atualizado com o dinheiro novo.' : 'Tudo certo, nada mudou no plano.', ok: true });
     onClose();
   });
   return (
     <div className="stack">
       <Alert tone="ok">{brl(income.amount_cents)} registrados em {acc?.name}.</Alert>
-      <h3>Sugestão de divisão</h3>
-      <p className="hint">Baseada na sua situação agora (contas até {new Date(sug.period.end + 'T12:00').toLocaleDateString('pt-BR')}, reserva e aportes pendentes). Ajuste como quiser. É um registro de planejamento: o app não movimenta dinheiro no banco. O valor separado continua em {acc?.name}, só que deixa de aparecer como livre.</p>
-      <ul className="hint">{sug.explain.map((e, i) => <li key={i}>{e}</li>)}</ul>
+      <h3>Como dividir esse dinheiro</h3>
+      <SplitBar parts={parts} label="Divisão do dinheiro novo" />
       <div className="calc">
-        <div className="ln"><span>Contas e despesas essenciais (fica no saldo para pagá-las)</span><b className="num">{brl(sug.contas)}</b></div>
+        {r.billGap > 0 && <div className="ln"><span>Cobrir contas que estavam descobertas</span><b className="num">{brl(r.billGap)}</b></div>}
+        {r.adds.map((a) => <div className="ln" key={a.key}><span>{a.icon} {a.name}<br /><small className="muted">{a.reason}</small></span><b className="num">+{brl(a.amount)}</b></div>)}
+        <div className="ln"><span>Fica livre</span><b className="num">{brl(r.livre)}</b></div>
       </div>
-      {sug.reserveGoal && <Field label={`Reserva para imprevistos (${sug.reserveGoal.name})`}><MoneyInput value={reserva} onChange={setReserva} /></Field>}
-      {goals.map((g) => <Field key={g.id} label={`Meta: ${g.name}`}><MoneyInput value={metas[g.id]} onChange={(v) => setMetas((x) => ({ ...x, [g.id]: v }))} /></Field>)}
-      <div className="calc"><div className="ln"><span>Livre para gastar</span><b className={`num ${livre < 0 ? 'bad' : ''}`}>{brl(livre)}</b></div></div>
+      <p className="hint">Considerei {r.base === 'plano' ? 'seu plano salvo' : 'a divisão sugerida'} e só completei o que faltava: nada que já estava reservado foi reservado de novo. Separar no aplicativo é planejamento — o dinheiro continua em {acc?.name}, nada é transferido no banco.</p>
+      {metaAdds.length > 0 && <label className="check"><input type="checkbox" checked={separar} onChange={(e) => setSeparar(e.target.checked)} />Marcar agora como separado para {metaAdds.map((a) => a.name).join(', ')}</label>}
       {s.error && <p className="err">{s.error}</p>}
-      <div className="form-actions"><button className="btn" onClick={onClose}>Não separar agora</button><button className="btn primary" disabled={s.busy || livre < 0} onClick={() => s.run().catch(() => {})}>Confirmar separação</button></div>
+      <div className="form-actions">
+        <button className="btn" onClick={onClose}>Não dividir agora</button>
+        <button className="btn" onClick={() => { onClose(); go('plano/organizar'); }}>Ajustar valores</button>
+        <button className="btn primary" disabled={s.busy} onClick={() => s.run().catch(() => {})}>{r.adds.length ? 'Confirmar divisão' : 'Ok'}</button>
+      </div>
     </div>
   );
 }

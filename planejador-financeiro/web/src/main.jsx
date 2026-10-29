@@ -1,5 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/fraunces/wght.css';
 import './styles.css';
 
 // Mantém formulários e botões visíveis acima do teclado no celular: a altura visível real

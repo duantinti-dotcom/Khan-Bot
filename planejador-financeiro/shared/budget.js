@@ -3,7 +3,8 @@
 // Um plano é planejamento: não desconta saldo nem vira despesa. O gasto registrado reduz o saldo
 // (uma vez) e é comparado ao valor planejado da categoria (sem descontar de novo).
 
-import { addDays, diffDays, formatBR } from './dates.js';
+import { addDays, diffDays, formatBR, startOfMonth } from './dates.js';
+import { occurrenceDates } from './recurrence.js';
 import { splitProportional } from './money.js';
 import {
   spendable, historyWindow, goalMetrics, activeGoals, sortGoals, pendingExpenses, expectedIncome, accountsSummary,
@@ -27,33 +28,98 @@ export function categoryDaily(state, today) {
 
 export const itemKey = (type, id) => `${type}:${id}`;
 
+export const STYLES = {
+  equilibrado: { label: 'Equilibrado', desc: 'Contas e necessidades primeiro, depois metas, depois lazer.' },
+  lazer: { label: 'Mais para viver', desc: 'Necessidades primeiro, depois lazer e passeios, depois metas.' },
+  guardar: { label: 'Guardar mais', desc: 'Necessidades primeiro, metas completas, lazer um pouco menor e parte da sobra para a meta.' },
+};
+
+const TRANSPORTE = /uber|99|t[aá]xi|transporte|[oô]nibus|metr[oô]|corrida/i;
+const LAZER_RE = /namor|passeio|lazer|sa[ií]da|rol[eê]|divers|cinema|bar/i;
+
+// Início do ciclo atual: último recebimento da renda principal (ou dia 1 do mês).
+export function cycleStart(state, today) {
+  const sp = spendable(state, today, { includePlanned: false });
+  if (sp.period.nextIncome) {
+    const inc = state.recurrences.filter((r) => r.active && r.kind === 'receita');
+    const main = inc.filter((r) => r.is_main_income);
+    let last = null;
+    for (const r of (main.length ? main : inc)) {
+      const occ = occurrenceDates(r, addDays(today, -62), today);
+      const d = occ[occ.length - 1];
+      if (d && (!last || d > last)) last = d;
+    }
+    if (last) return last;
+  }
+  return startOfMonth(today);
+}
+
+// Gasto por categoria desde o início do ciclo (pagos − reembolsos), para mostrar "já gastei".
+export function spentSince(state, from, today) {
+  const by = new Map();
+  for (const t of state.transactions) {
+    if (t.status !== 'realizado' || t.date < from || t.date > today || !t.category_id) continue;
+    const v = t.kind === 'despesa' ? t.amount_cents : t.kind === 'reembolso' ? -t.amount_cents : 0;
+    if (v) by.set(t.category_id, (by.get(t.category_id) || 0) + v);
+  }
+  return by;
+}
+
+// Perguntas práticas quando falta histórico para estimar uma categoria.
+export function budgetQuestions(state, today) {
+  const { daily, window } = categoryDaily(state, today);
+  const out = [];
+  for (const c of state.categories.filter((x) => !x.archived)) {
+    if (c.estimate_weekly_cents != null) continue;
+    const hasHistory = (daily.get(c.id) || 0) > 0 && !window.short;
+    if (hasHistory) continue;
+    if (TRANSPORTE.test(c.name)) out.push({ category: c, kind: 'viagens', text: `Quantas vezes por semana você usa ${c.name} e quanto custa em média cada viagem?` });
+    else if (LAZER_RE.test(c.name)) out.push({ category: c, kind: 'semanal', text: `Quanto você quer reservar por semana para “${c.name}”?` });
+    else out.push({ category: c, kind: 'semanal', text: `Quanto você costuma gastar por semana com “${c.name}”? (0 se não usa)` });
+  }
+  const noBills = !state.recurrences.some((r) => r.kind === 'despesa' && r.active);
+  return { categories: out, noBills, short: window.short };
+}
+
 // Sugestão de distribuição.
 // opts.locked: { [chave]: centavos } valores que a pessoa fixou.
 // opts.essential: { [categoryId]: boolean } sobrescreve essencial/flexível só nesta simulação.
+// opts.style: 'equilibrado' | 'lazer' | 'guardar' (ordem de prioridade depois das necessidades).
 export function suggestBudget(state, today, opts = {}) {
   const locked = opts.locked || {};
   const essOverride = opts.essential || {};
+  const style = STYLES[opts.style] ? opts.style : (STYLES[state.profile?.budget_style] ? state.profile.budget_style : 'equilibrado');
   const sp = spendable(state, today, { includePlanned: false });
-  const available = sp.livre;
+  const available = sp.livre + (opts.extra || 0);
   const pool = Math.max(0, available);
   const days = sp.days;
   const { daily, window } = categoryDaily(state, today);
+  const start = cycleStart(state, today);
+  const spent = spentSince(state, start, today);
 
   const items = [];
   for (const c of state.categories.filter((x) => !x.archived)) {
     const avg = daily.get(c.id) || 0;
-    // Sem histórico, usa o limite mensal que a pessoa definiu (proporcional aos dias do período).
-    const fromLimit = !avg && c.monthly_limit_cents ? Math.round((c.monthly_limit_cents * days) / 30) : 0;
-    const need = avg ? Math.round(avg * days) : fromLimit;
+    const est = c.estimate_weekly_cents;
+    // Fonte do valor necessário, nesta ordem: estimativa informada (quando há pouco histórico ou nenhum),
+    // média do histórico, limite mensal proporcional, ou nada (a pessoa define).
+    let need = 0, source = 'nada', reason;
+    if (est != null && (window.short || !avg)) {
+      need = Math.round((est * days) / 7); source = 'estimativa';
+      reason = `Estimativa sua: ${c.estimate_note || `${fmt(est)} por semana`} → ${fmt(need)} para ${days} dia(s).`;
+    } else if (avg) {
+      need = Math.round(avg * days); source = 'historico';
+      reason = `Você gasta em média ${fmt(Math.round(avg))} por dia aqui (últimos ${window.days} dias) × ${days} dia(s).`;
+    } else if (c.monthly_limit_cents) {
+      need = Math.round((c.monthly_limit_cents * days) / 30); source = 'limite';
+      reason = `Sem histórico; usei seu limite de ${fmt(c.monthly_limit_cents)}/mês proporcional a ${days} dia(s).`;
+    } else {
+      reason = 'Sem gastos registrados nem estimativa: responda a pergunta ao lado ou defina um valor.';
+    }
     const essential = essOverride[c.id] ?? c.essential;
     items.push({
       key: itemKey('categoria', c.id), type: 'categoria', id: c.id, name: c.name, icon: c.icon, color: c.color, essential,
-      need, stage: essential ? 1 : 3,
-      reason: avg
-        ? `Você gasta em média ${fmt(Math.round(avg))} por dia aqui (últimos ${window.days} dias) × ${days} dia(s) até ${formatBR(sp.period.end)}.`
-        : fromLimit
-          ? `Sem gastos registrados ainda; usei seu limite de ${fmt(c.monthly_limit_cents)}/mês proporcional a ${days} dia(s).`
-          : 'Sem gastos registrados nesta categoria ainda: defina um valor se for usar.',
+      need, source, stage: essential ? 1 : (style === 'lazer' ? 2 : 3), reason, spent: Math.max(0, spent.get(c.id) || 0),
     });
   }
   const gm = sortGoals(activeGoals(state).map((g) => goalMetrics(g, state, today)))
@@ -61,7 +127,7 @@ export function suggestBudget(state, today, opts = {}) {
   for (const m of gm) {
     items.push({
       key: itemKey('meta', m.goal.id), type: 'meta', id: m.goal.id, name: m.goal.name, icon: m.goal.kind === 'reserva' ? '🛟' : '🎯',
-      essential: false, need: m.pendingThisMonth, stage: 2, kind: m.goal.kind,
+      essential: false, need: m.pendingThisMonth, stage: style === 'lazer' ? 3 : 2, kind: m.goal.kind, metrics: m, spent: m.contributedThisMonth,
       reason: m.pendingThisMonth > 0 ? `Falta guardar ${fmt(m.pendingThisMonth)} neste mês para seguir o plano da meta.` : 'O aporte deste mês já foi feito.',
     });
   }
@@ -74,36 +140,96 @@ export function suggestBudget(state, today, opts = {}) {
   const overLocked = Math.max(0, lockedSum - pool);
   let rem = Math.max(0, pool - lockedSum);
 
-  // Ordem: categorias essenciais → metas (por prioridade e prazo) → categorias flexíveis.
   const free = items.filter((i) => !i.locked);
-  const fundGroup = (group, proportional) => {
-    const need = group.reduce((s, i) => s + i.need, 0);
-    if (need <= rem) { for (const i of group) i.amount = i.need; rem -= need; return; }
+  const fundGroup = (group, proportional, factor = 1) => {
+    const needOf = (i) => Math.round(i.need * factor);
+    const need = group.reduce((s, i) => s + needOf(i), 0);
+    if (need <= rem) { for (const i of group) i.amount = needOf(i); rem -= need; return; }
     if (proportional) {
-      const parts = splitProportional(rem, group.map((i) => i.need));
+      const parts = splitProportional(rem, group.map(needOf));
       group.forEach((i, k) => { i.amount = parts[k]; });
       rem = 0;
     } else {
-      for (const i of group) { i.amount = Math.min(i.need, rem); rem -= i.amount; }
+      for (const i of group) { i.amount = Math.min(needOf(i), rem); rem -= i.amount; }
     }
   };
+  // Necessidades sempre primeiro. Depois a ordem do estilo escolhido.
   fundGroup(free.filter((i) => i.stage === 1), true);
-  fundGroup(free.filter((i) => i.stage === 2), false);
-  fundGroup(free.filter((i) => i.stage === 3), true);
+  if (style === 'lazer') {
+    fundGroup(free.filter((i) => i.stage === 2), true);
+    fundGroup(free.filter((i) => i.stage === 3), false);
+  } else if (style === 'guardar') {
+    fundGroup(free.filter((i) => i.stage === 2), false);
+    fundGroup(free.filter((i) => i.stage === 3), true, 0.75);
+  } else {
+    fundGroup(free.filter((i) => i.stage === 2), false);
+    fundGroup(free.filter((i) => i.stage === 3), true);
+  }
+  for (const i of items) i.amount = i.amount || 0;
+  // "Guardar mais": metade do que sobrar vai para a primeira meta, como aporte extra.
+  if (style === 'guardar' && rem > 0) {
+    const g = free.find((i) => i.type === 'meta');
+    if (g) {
+      const extra = Math.floor(rem / 2);
+      g.amount += extra; g.extra = extra; rem -= extra;
+      if (extra) g.reason += ` Mais ${fmt(extra)} extra para adiantar a meta.`;
+    }
+  }
   for (const i of items) {
-    i.amount = i.amount || 0;
     i.short = i.locked ? 0 : Math.max(0, i.need - i.amount);
+    i.left = i.amount; // quanto ainda pode gastar/guardar neste período segundo a sugestão
+    if (i.type === 'meta' && i.metrics) i.effect = goalEffect(i, i.metrics);
   }
   const distributed = items.reduce((s, i) => s + i.amount, 0);
   const livre = pool - distributed;
   const totalNeed = items.reduce((s, i) => s + i.need, 0);
   const totalShort = items.reduce((s, i) => s + i.short, 0) + Math.max(0, -available);
   return {
-    sp, period: sp.period, days, available, pool, items, distributed, livre, lockedSum, overLocked, totalNeed, totalShort,
-    window, essentialShort: items.filter((i) => i.stage === 1 && i.short > 0).reduce((s, i) => s + i.short, 0),
+    sp, period: sp.period, cycleStart: start, days, available, pool, items, distributed, livre, lockedSum, overLocked, totalNeed, totalShort,
+    style, window, essentialShort: items.filter((i) => i.stage === 1 && i.short > 0).reduce((s, i) => s + i.short, 0),
   };
 }
 
+// Como o valor proposto para uma meta afeta o prazo.
+function goalEffect(item, m) {
+  if (m.status === 'sem_prazo' || !m.deadline) return 'Sem prazo calculável: informe a data de nascimento ou uma data.';
+  const ref = m.planMonthly || m.perMonth || 0;
+  if (item.amount >= item.need) {
+    if (item.extra && ref > 0) return `Mantém o plano e adianta a meta em cerca de ${Math.ceil((item.extra / ref) * 30.4375)} dia(s).`;
+    return 'Mantém a meta no ritmo planejado.';
+  }
+  const miss = item.need - item.amount;
+  return ref > 0 ? `Faltam ${fmt(miss)} do aporte do mês: a meta atrasa cerca de ${Math.ceil((miss / ref) * 30.4375)} dia(s) se não compensar depois.` : `Faltam ${fmt(miss)} do aporte do mês.`;
+}
+
+// Dinheiro novo (entrada picada): sugere onde colocar SÓ o valor que entrou, sem reservar de novo o que
+// o plano atual já cobre. Base = plano salvo (ou, sem plano, a divisão sugerida antes desta entrada).
+export function splitNewIncome(state, today, amount, opts = {}) {
+  const before = suggestBudget(state, today, { ...opts, extra: -(opts.alreadyCounted || 0) });
+  const planned = new Map();
+  if (state.plan) for (const i of state.plan.items) planned.set(itemKey(i.type, i.ref_id), i.amount_cents);
+  else for (const i of before.items) planned.set(i.key, i.amount);
+  let rem = amount;
+  const adds = [];
+  const give = (i, v, why) => { if (v > 0) { adds.push({ key: i.key, type: i.type, id: i.id, name: i.name, icon: i.icon, amount: v, reason: why }); rem -= v; } };
+  // 0. Se o saldo já estava curto para as contas, o dinheiro novo cobre isso primeiro.
+  const billGap = Math.min(rem, Math.max(0, -before.available));
+  rem -= billGap;
+  const gapOf = (i) => Math.max(0, i.need - (planned.get(i.key) || 0));
+  const order = [
+    ...before.items.filter((i) => i.stage === 1),
+    ...before.items.filter((i) => i.type === 'meta'),
+    ...before.items.filter((i) => i.type === 'categoria' && i.stage !== 1),
+  ];
+  for (const i of order) {
+    if (rem <= 0) break;
+    const gap = gapOf(i);
+    if (!gap) continue;
+    const v = Math.min(gap, rem);
+    give(i, v, i.type === 'meta' ? `Completa o aporte que faltava (${fmt(gap)}).` : i.stage === 1 ? `Necessidade ainda descoberta no plano (${fmt(gap)}).` : `Completa o valor de costume que ficou faltando (${fmt(gap)}).`);
+  }
+  return { amount, billGap, adds, livre: rem, base: state.plan ? 'plano' : 'sugestao', planned };
+}
 // Quanto do plano salvo já foi usado (gastos e aportes registrados depois de criar o plano).
 export function budgetUsage(state, plan) {
   if (!plan) return null;

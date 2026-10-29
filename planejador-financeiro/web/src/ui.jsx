@@ -109,9 +109,8 @@ export function Ring({ value, size = 112, label }) {
   return (
     <div className="ring" style={{ width: size, height: size }}>
       <svg width={size} height={size} aria-hidden="true">
-        <defs><linearGradient id="rg" x1="0" x2="1"><stop offset="0" stopColor="var(--accent)" /><stop offset="1" stopColor="var(--accent2)" /></linearGradient></defs>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface2)" strokeWidth="10" />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="url(#rg)" strokeWidth="10" strokeLinecap="round"
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--fill)" strokeWidth="8" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--accent)" strokeWidth="8" strokeLinecap="round"
           strokeDasharray={`${len * pct} ${len}`} style={{ transition: 'stroke-dasharray .6s ease' }} />
       </svg>
       <div className="c num">{label ?? `${Math.round(pct * 100)}%`}</div>
@@ -139,13 +138,13 @@ export function BarsChart({ series }) {
   return (
     <figure style={{ margin: 0 }}>
       <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Entradas, saídas e valores guardados por mês">
-        {[0, 0.5, 1].map((f) => <line key={f} x1={P} x2={W - P} y1={y(max * f)} y2={y(max * f)} stroke="var(--border)" />)}
+        {[0, 0.5, 1].map((f) => <line key={f} x1={P} x2={W - P} y1={y(max * f)} y2={y(max * f)} stroke="var(--line)" />)}
         {series.map((s, i) => {
           const x = P + i * bw + bw * 0.14;
           const w = (bw * 0.72) / 3;
           return (
             <g key={s.key}>
-              <rect x={x} y={y(s.income)} width={w - 3} height={H - 24 - y(s.income)} rx="4" fill="var(--accent2)"><title>Entradas {formatBRL(s.income)}</title></rect>
+              <rect x={x} y={y(s.income)} width={w - 3} height={H - 24 - y(s.income)} rx="4" fill="var(--ok)"><title>Entradas {formatBRL(s.income)}</title></rect>
               <rect x={x + w} y={y(s.expenses)} width={w - 3} height={H - 24 - y(s.expenses)} rx="4" fill="var(--bad)" opacity=".85"><title>Saídas {formatBRL(s.expenses)}</title></rect>
               <rect x={x + 2 * w} y={y(s.saved)} width={w - 3} height={H - 24 - y(s.saved)} rx="4" fill="var(--accent)"><title>Guardado {formatBRL(s.saved)}</title></rect>
               <text x={P + i * bw + bw / 2} y={H - 6} textAnchor="middle">{monthLabel(s.key)}</text>
@@ -154,7 +153,7 @@ export function BarsChart({ series }) {
         })}
         <text x={P} y={y(max) - 6}>{formatBRL(max)}</text>
       </svg>
-      <div className="legend"><span><i style={{ background: 'var(--accent2)' }} />Entradas</span><span><i style={{ background: 'var(--bad)' }} />Saídas</span><span><i style={{ background: 'var(--accent)' }} />Guardado para metas</span></div>
+      <div className="legend"><span><i style={{ background: 'var(--ok)' }} />Entradas</span><span><i style={{ background: 'var(--bad)' }} />Saídas</span><span><i style={{ background: 'var(--accent)' }} />Guardado para metas</span></div>
     </figure>
   );
 }
@@ -172,7 +171,7 @@ export function GoalChart({ points, target, deadline, start }) {
   const last = points[points.length - 1];
   return (
     <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Evolução da meta">
-      <line x1={P} x2={W - P} y1={y(target)} y2={y(target)} stroke="var(--accent2)" strokeDasharray="5 5" />
+      <line x1={P} x2={W - P} y1={y(target)} y2={y(target)} stroke="var(--ok)" strokeDasharray="5 5" />
       <text x={W - P} y={y(target) - 6} textAnchor="end">Meta {formatBRL(target)}</text>
       {deadline && <line x1={P} y1={y(0)} x2={x(deadline)} y2={y(target)} stroke="var(--faint)" strokeDasharray="2 6" />}
       <path d={path} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinejoin="round" />
@@ -207,6 +206,11 @@ export function AnimatedMoney({ c, className = '' }) {
   return <span className={`num ${className}`}>{formatBRL(shown)}</span>;
 }
 
+// Expansão suave (altura animada via grid), usada em explicações e detalhes.
+export function Expander({ open, children, id }) {
+  return <div className={`expander ${open ? 'open' : ''}`} id={id} aria-hidden={!open}><div>{children}</div></div>;
+}
+
 // Um dos números principais, com explicação curta ao tocar no "?".
 export function Tile({ label, value, sub, explain, tone, main, wide }) {
   const [open, setOpen] = useState(false);
@@ -219,8 +223,51 @@ export function Tile({ label, value, sub, explain, tone, main, wide }) {
       </div>
       <div className={`val ${tone || ''}`}><AnimatedMoney c={value} /></div>
       {sub && <div className="sub">{sub}</div>}
-      {open && <div className="explain" id={`${id}-e`}>{explain}</div>}
+      <Expander open={open} id={`${id}-e`}><div className="explain">{explain}</div></Expander>
     </section>
+  );
+}
+
+// Barra que mostra como o dinheiro foi dividido (cada parte na sua cor).
+export function SplitBar({ parts, label = 'Divisão do dinheiro' }) {
+  const total = parts.reduce((s, p) => s + Math.max(0, p.value), 0);
+  if (!total) return <div className="split" aria-label={label} />;
+  return (
+    <div className="split" role="img" aria-label={`${label}: ${parts.filter((p) => p.value > 0).map((p) => `${p.label} ${formatBRL(p.value)}`).join(', ')}`}>
+      {parts.filter((p) => p.value > 0).map((p, i) => (
+        <i key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color, animationDelay: `${i * 60}ms` }} title={`${p.label}: ${formatBRL(p.value)}`} />
+      ))}
+    </div>
+  );
+}
+
+// Ícones de linha para a navegação (sem ícones decorativos).
+const PATHS = {
+  inicio: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  mov: 'M7 4v14m0 0-3-3m3 3 3-3M17 20V6m0 0-3 3m3-3 3 3',
+  plano: 'M12 3v9l7.5 4.5M21 12a9 9 0 1 1-9-9',
+  metas: 'M5 21V4m0 0h11l-2 4 2 4H5',
+  perfil: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0',
+  mais: 'M12 5v14M5 12h14',
+  sair: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10',
+  seta: 'M9 6l6 6-6 6',
+  check: 'M5 12l4 4 10-10',
+  alerta: 'M12 8v5m0 3h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+  entrada: 'M12 4v14m0 0-5-5m5 5 5-5',
+  gasto: 'M12 20V6m0 0-5 5m5-5 5 5',
+  transf: 'M4 8h13m0 0-3-3m3 3-3 3M20 16H7m0 0 3-3m-3 3 3 3',
+  guardar: 'M5 21V4m0 0h11l-2 4 2 4H5',
+  categorias: 'M4 6h16M4 12h16M4 18h10',
+  contas: 'M3 7h18v12H3zM3 11h18',
+  fixos: 'M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4',
+  dados: 'M12 3l7 3v6c0 4-3 7.5-7 9-4-1.5-7-5-7-9V6z',
+  aprender: 'M4 5h7a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H4zM20 5h-7a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h7z',
+};
+export function Icon({ name, size = 22 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={PATHS[name]} />
+    </svg>
   );
 }
 
@@ -231,7 +278,7 @@ export function More({ label = 'Mais opções', children, open }) {
 export function EmptyCta({ icon, title, text, action }) {
   return (
     <div className="card empty-cta">
-      <div className="big" aria-hidden="true">{icon}</div>
+      <div className="big" aria-hidden="true"><Icon name={icon} size={30} /></div>
       <h3>{title}</h3>
       {text && <p className="muted">{text}</p>}
       {action}

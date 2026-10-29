@@ -217,7 +217,7 @@ export default function Movimentacoes() {
         <Seg value={tab} onChange={(t) => go(`movimentacoes/${t}`)} options={[['lista', 'Lista'], ['calendario', 'Calendário'], ['fixos', 'Fixos'], ['parcelas', 'Parcelas'], ['mes', 'Mês']]} />
       </div>
       {!has && tab === 'lista' ? (
-        <EmptyCta icon="⇅" title="Nenhuma movimentação ainda" text="Registre o que entrou ou saiu. Valores pequenos também contam."
+        <EmptyCta icon="mov" title="Nenhuma movimentação ainda" text="Registre o que entrou ou saiu. Valores pequenos também contam."
           action={<button className="btn primary" onClick={() => open('novo')}>+ Registrar</button>} />
       ) : (
         <>

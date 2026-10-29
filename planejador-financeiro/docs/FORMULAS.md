@@ -80,12 +80,14 @@ a estimativa de renda variável informada pela pessoa pode ser usada se for maio
 A sobra é distribuída às metas por prioridade e prazo. Sugestões de corte: só categorias não essenciais,
 até 25% da média de cada uma.
 
-## Divisão de uma entrada
+## Divisão de uma entrada (`splitNewIncome`)
 
-1. Contas: o que faltava para cobrir as contas até o fim do período.
-2. Reserva: 20% do restante se a reserva está abaixo de 50% do alvo, senão 10% (limitado ao que falta).
-3. Metas: aporte pendente do mês por prioridade, limitado a 50% do que sobrou.
-4. O resto fica livre. A pessoa revisa e confirma; nada é movimentado no banco.
+Divide só o dinheiro novo, sem reservar de novo o que já estava separado:
+
+1. Base: o plano salvo; sem plano, a divisão sugerida calculada **antes** da entrada.
+2. Se o saldo não cobria as contas até a próxima renda, o dinheiro novo cobre essa falta primeiro.
+3. Depois completa as lacunas `necessário − já planejado`, nesta ordem: necessidades essenciais, metas, categorias flexíveis.
+4. O resto fica livre. A pessoa revisa e confirma; o plano é atualizado somando os acréscimos. Nada é movimentado no banco.
 
 ## Organizar meu dinheiro (`shared/budget.js`)
 
@@ -97,12 +99,19 @@ Recebimentos previstos não entram. Para cada item:
 
 - Categoria: `necessário = gasto médio por dia × dias do período`. A média usa só gastos avulsos pagos
   (contas fixas e parcelas já estão em "contas a pagar"), menos reembolsos, na janela de histórico (30–90 dias).
-  Sem histórico, usa o limite mensal da categoria × dias ÷ 30; sem limite, 0 (a pessoa define).
+  Com pouco histórico (ou nenhum), usa a estimativa informada pela pessoa (`por semana × dias ÷ 7`, ex.: 4 viagens × R$ 15),
+  marcada como "estimativa sua". Sem estimativa nem histórico, usa o limite mensal × dias ÷ 30; sem limite, 0.
 - Meta/reserva: o aporte que falta no mês.
 
 Distribuição (sem percentuais fixos): primeiro os valores fixados pela pessoa; depois categorias essenciais
-(proporcional ao necessário se não couber), metas por prioridade e prazo, e categorias flexíveis
-(proporcional). O que sobra fica "livre". A soma nunca passa do disponível — o servidor recalcula o disponível
+(proporcional ao necessário se não couber). Em seguida, conforme o estilo:
+
+- Equilibrado: metas (por prioridade e prazo), depois flexíveis (proporcional).
+- Mais para viver: flexíveis, depois metas.
+- Guardar mais: metas completas, flexíveis até 75% do necessário e metade da sobra como aporte extra na meta principal.
+
+Cada item mostra o já gasto no ciclo (desde a última renda principal ou o dia 1º), o motivo do valor e, para metas,
+o efeito no prazo (mantém, adianta ou atrasa). O que sobra fica "livre". A soma nunca passa do disponível — o servidor recalcula o disponível
 e recusa um plano que passe dele. Quando não cabe tudo, cada item mostra quanto falta.
 
 O plano salvo é só planejamento: não desconta saldo nem vira despesa. Um gasto registrado depois do plano
@@ -116,3 +125,14 @@ recalcula a sugestão, mas só substitui o plano depois da confirmação.
   Fica separado do saldo atual.
 - Renda futura comprometida: contas a pagar ÷ recebimentos previstos nos próximos 30 dias.
 - Fim de semana (assistente): `min(livre, livre por dia × dias do fim de semana)`.
+
+## Assistente com IA (opcional)
+
+Quando o servidor tem a chave `ANTHROPIC_API_KEY`, `POST /api/ai/ask` envia ao modelo só um resumo calculado pelo
+app (`buildAiContext` em `server/ai.js`): período, dinheiro disponível, contas, já separado, quanto dá para dividir,
+recebimentos previstos (marcados como "ainda não entraram"), itens com necessário/sugestão/gasto e avisos.
+Não vão usuário, senha, sessão, identificadores nem nomes de contas. A IA devolve texto, no máximo uma pergunta
+prática e ajustes opcionais por item; os ajustes viram valores fixados e passam pelo mesmo `suggestBudget`. Se a
+soma passar do disponível, a proposta é descartada. Nada é aplicado sem a confirmação na tela "Organizar".
+Limite: 40 perguntas por pessoa por dia. Sem chave, a rota responde `configured: false` e os atalhos por regras
+continuam funcionando.

@@ -1,1 +1,1 @@
-{ "name": "Órbita · Planejador financeiro", "short_name": "Órbita", "start_url": "/", "display": "standalone", "background_color": "#070b14", "theme_color": "#070b14", "lang": "pt-BR", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
+{ "name": "Órbita · Planejador financeiro", "short_name": "Órbita", "start_url": "/", "display": "standalone", "background_color": "#f6f2e9", "theme_color": "#f6f2e9", "lang": "pt-BR", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }

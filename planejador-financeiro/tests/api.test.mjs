@@ -5,10 +5,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import postgres from 'postgres';
 import { createApi, PG_TYPES } from '../server/api.js';
+import { createAiAdvisor, AI_MODEL } from '../server/ai.js';
 import * as C from '../shared/calc.js';
 import { addDays } from '../shared/dates.js';
 
 const DB = process.env.TEST_DATABASE_URL;
+// Cliente falso no lugar do SDK da Anthropic: registra o que seria enviado e devolve JSON estruturado.
+const AI_CALLS = [];
+const fakeClient = { beta: { messages: { create: async (req) => {
+  AI_CALLS.push(req);
+  const ctx = JSON.parse(req.messages[0].content.match(/dados = (\{.*\})\n/)[1]);
+  const first = ctx.itens.find((i) => i.tipo !== 'meta');
+  return { model: req.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
+    texto: `Até ${ctx.periodo.ate} você pode dividir R$ ${ctx.dinheiro.pode_dividir}.`, pergunta: '',
+    ajustes: req.messages[0].content.includes('exagerado') ? [{ item: first.item, valor_reais: 999999 }] : [{ item: first.item, valor_reais: 10 }],
+  }) }] };
+} } } };
 let sql, handle, TODAY, MIGRATED;
 
 before(async () => {
@@ -25,9 +37,13 @@ before(async () => {
   await sql`INSERT INTO fin.transactions (user_id, kind, amount_cents, date, account_id, status) VALUES (${u.id}, 'receita', 500, '2026-10-01', ${a.id}, 'realizado')`;
   await sql.unsafe(await mig('002_orcamento_e_estimativas.sql'));
   await sql.unsafe(await mig('002_orcamento_e_estimativas.sql'));
+  await sql.unsafe(await mig('003_estimativas_e_estilo.sql'));
+  await sql`UPDATE fin.profiles SET theme = 'escuro'`; // escolha feita depois do novo padrão não é desfeita
+  await sql.unsafe(await mig('003_estimativas_e_estilo.sql'));
   MIGRATED = await sql`SELECT (SELECT count(*)::int FROM fin.users) AS users, (SELECT initial_cents FROM fin.accounts) AS bal,
-    (SELECT estimated FROM fin.recurrences) AS est, (SELECT count(*)::int FROM fin.transactions) AS txs`;
-  handle = createApi({ sql, secureCookies: true });
+    (SELECT estimated FROM fin.recurrences) AS est, (SELECT count(*)::int FROM fin.transactions) AS txs,
+    (SELECT theme FROM fin.profiles) AS theme, (SELECT budget_style FROM fin.profiles) AS style`;
+  handle = createApi({ sql, secureCookies: true, ai: createAiAdvisor(fakeClient), aiDailyLimit: 2 });
   TODAY = (await (await handle(new Request('http://x/api/health'))).json()).today;
 });
 after(async () => { if (sql) await sql.end(); });
@@ -297,7 +313,7 @@ test('recuperação de acesso, troca de senha e exclusão da conta', { skip }, a
 });
 
 test('migração 002 preserva dados existentes e é idempotente', { skip }, async () => {
-  assert.deepEqual(MIGRATED[0], { users: 1, bal: 12345, est: false, txs: 1 });
+  assert.deepEqual(MIGRATED[0], { users: 1, bal: 12345, est: false, txs: 1, theme: 'escuro', style: 'equilibrado' });
 });
 
 test('categorias: criar, editar, reordenar e arquivar preservando histórico', { skip }, async () => {
@@ -375,4 +391,31 @@ test('plano de distribuição: não passa do disponível, não desconta saldo, i
   assert.equal((await state(o)).plan, null);
   assert.equal((await c.call('DELETE', '/plans/active')).status, 200);
   assert.equal((await state(c)).plan, null);
+});
+
+test('assistente com IA: envia só dados calculados, valida ajustes e limita uso', { skip }, async () => {
+  const c = client('10.0.7.1');
+  await c.call('POST', '/auth/signup', { username: 'iauser', password: 'senha-ia-12345' });
+  await c.call('POST', '/accounts', { name: 'Nubank Pessoal', kind: 'corrente', purpose: 'gastar', liquidity: 'imediata', initial_cents: 20000 });
+  assert.equal((await c.call('GET', '/ai/status')).data.configured, true);
+  const r = await c.call('POST', '/ai/ask', { question: 'Monte meu orçamento', shortcut: 'montar' });
+  assert.equal(r.status, 200);
+  assert.match(r.data.texto, /pode dividir R\$ 200/);
+  assert.ok(r.data.rules.includes('Proposta'));
+  assert.ok(r.data.proposal && r.data.proposal.distributed <= 20000, 'proposta da IA recalculada pelo app e cabe no disponível');
+  const sent = AI_CALLS[AI_CALLS.length - 1];
+  assert.equal(sent.model, AI_MODEL);
+  assert.equal(sent.output_config.format.type, 'json_schema');
+  const payload = JSON.stringify(sent);
+  for (const secret of ['iauser', 'senha-ia-12345', 'Nubank Pessoal', 'fin_sess']) assert.ok(!payload.includes(secret), `não envia ${secret}`);
+  const bad = await c.call('POST', '/ai/ask', { question: 'algo exagerado' });
+  assert.equal(bad.data.proposal, null);
+  assert.match(bad.data.note, /descartada/);
+  assert.equal((await c.call('POST', '/ai/ask', { question: 'oi' })).status, 429, 'limite diário');
+  // Sem chave configurada, o app responde que a IA não está conectada e devolve o cálculo numérico.
+  const noAi = createApi({ sql, secureCookies: true });
+  const res = await noAi(new Request('https://app.test/api/ai/ask', { method: 'POST', headers: { 'x-fin-csrf': '1', cookie: c.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ shortcut: 'fimdesemana' }) }));
+  const j = await res.json();
+  assert.equal(j.configured, false);
+  assert.match(j.rules, /fim de semana/);
 });

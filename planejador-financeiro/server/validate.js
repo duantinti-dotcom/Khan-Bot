@@ -84,6 +84,7 @@ export const SPECS = {
   categories: {
     name: [T.str(1, 40)], color: [T.color()], icon: [T.str(0, 8), true],
     monthly_limit_cents: [T.int(0, MAX_CENTS), true], essential: [T.bool()], archived: [T.bool()], sort: [T.int(0, 1000)],
+    estimate_weekly_cents: [T.int(0, MAX_CENTS), true], estimate_note: [T.str(0, 80), true],
   },
   recurrences: {
     kind: [T.enum('receita', 'despesa')], amount_cents: [T.int(1, MAX_CENTS)], account_id: [T.uuid(), true],
@@ -114,6 +115,7 @@ export const SPECS = {
     has_variable_income: [T.bool(), true], variable_income_estimate_cents: [T.int(0, MAX_CENTS), true],
     risk_tolerance: [T.enum('baixa', 'media', 'alta'), true], theme: [T.enum('escuro', 'claro', 'sistema')],
     sim_yield_annual: [T.numeric(-0.5, 2), true], sim_inflation_annual: [T.numeric(-0.5, 2), true],
+    budget_style: [T.enum('equilibrado', 'lazer', 'guardar')],
   },
 };
 

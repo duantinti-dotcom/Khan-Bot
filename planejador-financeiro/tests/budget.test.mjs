@@ -131,9 +131,13 @@ test('assistente responde com dados reais e período', () => {
   assert.equal(big.verdict, 'nao_cabe');
   const rec = ask(s, TODAY, 'recebi', { amount: 10000 });
   assert.equal(rec.action.type, 'apply');
-  const body = rec.action.request.body;
-  assert.equal(body.items[0].amount_cents, 10000);
-  assert.ok(body.contributions.reduce((x, c) => x + c.amount_cents, 0) <= 10000);
+  assert.equal(rec.action.requests[0].body.amount_cents, 10000);
+  const planItems = rec.action.requests[1].body.items;
+  const before = B.suggestBudget(s, TODAY).distributed;
+  assert.ok(planItems.reduce((x, i) => x + i.amount_cents, 0) <= before + 10000, 'plano novo cabe no disponível depois da entrada');
+  assert.match(ask(s, TODAY, 'uber').answer, /Uber/);
+  assert.match(ask(s, TODAY, 'montar').answer, /Proposta até/);
+  assert.match(ask(s, TODAY, 'diminuir').answer, /Reduzindo/);
   const pas = ask(s, TODAY, 'passeios');
   assert.equal(pas.value, B.suggestBudget(s, TODAY).items.find((i) => i.id === 'namoro').amount);
   assert.ok(ask(s, TODAY, 'ajustar').answer.length > 0);
@@ -162,4 +166,78 @@ test('sem histórico, a sugestão usa o limite mensal proporcional ao período',
   s.categories.push({ id: 'pat', name: 'Patinete', essential: false, monthly_limit_cents: 6000 });
   const it = B.suggestBudget(s, TODAY).items.find((i) => i.id === 'pat');
   assert.equal(it.need, 600); // 60 × 3/30
+});
+
+test('estimativas informadas (viagens × custo) entram quando há pouco histórico, marcadas como estimativa', () => {
+  const s = state();
+  s.profile.created_at = '2026-10-20'; // pouco histórico
+  s.categories.find((c) => c.id === 'uber').estimate_weekly_cents = 5400; // 3 viagens × R$ 18
+  s.categories.find((c) => c.id === 'uber').estimate_note = '3 viagens × R$ 18,00';
+  const it = B.suggestBudget(s, TODAY).items.find((i) => i.id === 'uber');
+  assert.equal(it.source, 'estimativa');
+  assert.equal(it.need, Math.round((5400 * 3) / 7));
+  assert.match(it.reason, /3 viagens/);
+  const q = B.budgetQuestions(s, TODAY);
+  assert.ok(!q.categories.some((x) => x.category.id === 'uber'), 'não pergunta de novo o que já foi respondido');
+  assert.ok(q.categories.some((x) => x.category.id === 'namoro' && x.kind === 'semanal'));
+});
+
+test('estilos de divisão mudam a ordem depois das necessidades, nunca passando do disponível', () => {
+  const s = state();
+  s.accounts[0].initial_cents = 30000; // disponível 250,00 − não cobre tudo
+  for (const style of ['equilibrado', 'lazer', 'guardar']) {
+    const r = B.suggestBudget(s, TODAY, { style });
+    assert.ok(r.distributed <= r.pool, style);
+    const by = Object.fromEntries(r.items.map((i) => [i.key, i]));
+    assert.equal(by['categoria:alim'].amount, 3000, `${style}: essenciais primeiro`);
+    if (style === 'lazer') assert.equal(by['categoria:namoro'].amount, 3000);
+    if (style === 'equilibrado') assert.ok(by['meta:g'].amount >= by['categoria:namoro'].amount);
+  }
+  const g = B.suggestBudget(state(), TODAY, { style: 'guardar' });
+  const meta = g.items.find((i) => i.type === 'meta');
+  assert.ok(meta.extra > 0 && meta.amount > meta.need);
+  assert.match(meta.effect, /adianta/);
+  const nam = g.items.find((i) => i.id === 'namoro');
+  assert.equal(nam.amount, Math.round(nam.need * 0.75));
+});
+
+test('renda insuficiente: déficit aparece e nada é distribuído além do saldo', () => {
+  const s = state();
+  s.accounts[0].initial_cents = 0; // saldo 0, conta de 50 → faltam 50
+  s.transactions.push({ id: 'fut', kind: 'despesa', amount_cents: 20000, date: '2026-10-31', account_id: 'cc', status: 'previsto', description: 'Curso' });
+  const r = B.suggestBudget(s, TODAY);
+  assert.equal(r.available, -25000);
+  assert.equal(r.distributed, 0);
+  assert.ok(r.totalShort >= 25000);
+  // Conta futura (depois do período) não entra no período atual.
+  s.transactions.push({ id: 'fut2', kind: 'despesa', amount_cents: 99900, date: '2026-12-10', account_id: 'cc', status: 'previsto' });
+  assert.equal(B.suggestBudget(s, TODAY).available, -25000);
+});
+
+test('entrada picada: só completa o que faltava, sem reservar de novo o que o plano já cobre', () => {
+  const s = state();
+  s.plan = { id: 'p', created_at: '2026-10-29T10:00:00Z', period_start: TODAY, period_end: '2026-10-31', available_cents: 95000, items: [
+    { type: 'categoria', ref_id: 'alim', amount_cents: 3000 },   // já coberto
+    { type: 'categoria', ref_id: 'uber', amount_cents: 500 },    // faltam 1000
+    { type: 'meta', ref_id: 'g', amount_cents: 15000 },          // faltam 5000
+  ] };
+  const r = B.splitNewIncome(s, TODAY, 2000);
+  const by = Object.fromEntries(r.adds.map((a) => [a.key, a.amount]));
+  assert.equal(by['categoria:alim'], undefined);
+  assert.equal(by['categoria:uber'], 1000);
+  assert.equal(by['meta:g'], 1000);
+  assert.equal(r.adds.reduce((x, a) => x + a.amount, 0) + r.livre + r.billGap, 2000);
+  const big = B.splitNewIncome(s, TODAY, 20000);
+  const bb = Object.fromEntries(big.adds.map((a) => [a.key, a.amount]));
+  assert.equal(bb['meta:g'], 5000);
+  assert.equal(bb['categoria:namoro'], 3000);
+  assert.equal(big.livre, 20000 - 1000 - 5000 - 3000);
+});
+
+test('já gastei no ciclo e quanto resta pela sugestão', () => {
+  const s = state();
+  s.transactions.push({ id: 'n1', kind: 'despesa', amount_cents: 2500, date: '2026-10-20', account_id: 'cc', category_id: 'namoro', status: 'realizado' });
+  const r = B.suggestBudget(s, TODAY);
+  assert.equal(r.cycleStart, '2026-10-01');
+  assert.equal(r.items.find((i) => i.id === 'namoro').spent, 90000 + 2500);
 });

@@ -10,7 +10,8 @@ quanto posso gastar agora, quanto separar para as próximas contas e quanto guar
 | Interface | React 18 + Vite (`web/`) | Vercel (site estático) |
 | API | `server/api.js` (Web `Request`/`Response`) | Supabase Edge Function `fin-api` (Deno) |
 | Banco | PostgreSQL, esquema isolado `fin` (`server/migrations/`, todas juntas em `server/schema.sql`) | Supabase |
-| Cálculos | `shared/calc.js` (puro, determinístico) | navegador e testes |
+| Cálculos | `shared/calc.js`, `shared/budget.js`, `shared/assistant.js` (puros, determinísticos) | navegador, API e testes |
+| IA (opcional) | `server/ai.js` com o SDK oficial da Anthropic; recebe só números calculados | Edge Function |
 
 O Vercel repassa `/api/*` para a Edge Function, então site e API ficam no mesmo domínio e a sessão usa cookie
 `__Host-` HttpOnly, Secure, SameSite=Lax. O navegador não guarda dados financeiros.
@@ -41,6 +42,8 @@ npm run test:e2e -- http://localhost:8787 ./shots   # navegador (Playwright)
 1. Banco novo: aplicar `server/schema.sql`. Banco existente: aplicar só as migrações novas de `server/migrations/` (são aditivas).
 2. Publicar `supabase/functions/fin-api` com `verify_jwt = false` (a função faz a própria autenticação).
    Ela usa a variável `SUPABASE_DB_URL`, já fornecida pelo Supabase.
+   IA (opcional): cadastrar o segredo `ANTHROPIC_API_KEY` em Supabase › Edge Functions › Secrets. Não precisa
+   publicar de novo; sem a chave, o assistente funciona só com os cálculos por regras.
 3. Publicar este diretório no Vercel (`vercel.json` define build e o repasse de `/api`).
 
 Fórmulas: [docs/FORMULAS.md](docs/FORMULAS.md).

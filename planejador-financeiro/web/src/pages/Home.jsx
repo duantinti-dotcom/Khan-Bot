@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp, TopBar } from '../App.jsx';
 import { put } from '../api.js';
 import * as C from '@shared/calc.js';
 import * as B from '@shared/budget.js';
 import { formatBR, relativeDays, diffDays, weekdayShort } from '@shared/dates.js';
-import { brl, Tile, Progress, EmptyCta, useToast } from '../ui.jsx';
+import { brl, AnimatedMoney, SplitBar, Expander, EmptyCta, Seg, Icon, useToast } from '../ui.jsx';
+import { DivisionRow, ApplyPlanModal } from '../budgetui.jsx';
 import { settle } from '../actions.js';
 
 export function GoalStatus({ m }) {
@@ -28,9 +29,25 @@ export function BillItem({ b, cats, today, onPay, payLabel = 'Paguei' }) {
           {weekdayShort(b.date)}, {formatBR(b.date)} · {d < 0 ? `${b.kind === 'receita' ? 'prevista' : 'venceu'} há ${-d} dia(s)` : relativeDays(today, b.date)}
         </div>
       </div>
-      <div className={`amt num ${b.kind === 'receita' ? 'ok' : ''}`}>{brl(b.amount_cents)}</div>
+      <div className={`amt ${b.kind === 'receita' ? 'ok' : ''}`}>{brl(b.amount_cents)}</div>
       {onPay && <button className="btn small" onClick={() => onPay(b)}>{payLabel}</button>}
     </div>
+  );
+}
+
+const COLORS = { contas: '#b9773a', separado: '#7c8597', guardar: '#2347c6', livre: '#2f7a57' };
+
+function FlowRow({ color, title, sub, value, explain, total }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className={`flow-row ${total ? 'total' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="sw" style={{ background: color }} aria-hidden="true" />
+        <span className="t">{title}{sub && <small>{sub}</small>}</span>
+        <span className="v">{brl(value)}</span>
+      </button>
+      <Expander open={open}><div className="flow-explain">{explain}</div></Expander>
+    </>
   );
 }
 
@@ -38,14 +55,17 @@ export default function Home() {
   const { data, today, reload, open, go } = useApp();
   const toast = useToast();
   const sp = useMemo(() => C.spendable(data, today), [data, today]);
-  const goalsM = useMemo(() => C.sortGoals(C.activeGoals(data).map((g) => C.goalMetrics(g, data, today))), [data, today]);
+  const [style, setStyle] = useState(null);
+  const [showStyles, setShowStyles] = useState(false);
+  const [apply, setApply] = useState(false);
+  const sug = useMemo(() => B.suggestBudget(data, today, style ? { style } : {}), [data, today, style]);
   const usage = useMemo(() => B.budgetUsage(data, data.plan), [data]);
   const stale = useMemo(() => B.planStale(data, data.plan, today), [data, today]);
   const cats = new Map(data.categories.map((c) => [c.id, c]));
   const name = data.profile.display_name || data.user.username;
 
   const pay = async (b) => {
-    try { await settle(b, today); await reload(); toast({ text: `“${b.description || 'Conta'}” marcada como paga.`, ok: true }); }
+    try { await settle(b, today); await reload(); toast({ text: `${b.kind === 'receita' ? 'Recebimento confirmado' : `“${b.description || 'Conta'}” paga`}.`, ok: true }); }
     catch (e) { if (!e.cancelled) alert(e.message); else toast(e.message); }
   };
 
@@ -53,106 +73,130 @@ export default function Home() {
     return (
       <>
         <TopBar title={`Olá, ${name}`} subtitle={formatBR(today)} />
-        <EmptyCta icon="🏦" title="Comece pelo seu dinheiro" text="Cadastre onde seu dinheiro está (conta, carteira) e o saldo de hoje. Depois o app mostra quanto você pode gastar."
+        <EmptyCta icon="contas" title="Comece pelo seu dinheiro" text="Cadastre onde seu dinheiro está (conta, carteira) e quanto tem hoje. Depois o app mostra quanto você pode gastar e como dividir."
           action={<button className="btn primary" onClick={() => go('perfil/contas')}>Cadastrar conta</button>} />
       </>
     );
   }
 
-  const comprometido = sp.compromissos + sp.separado;
-  const guardar = sp.aportesPendentes;
-  const incomesToConfirm = sp.incomes.filter((i) => i.date <= today);
-  const billsBefore = sp.bills;
+  const guardar = sp.includePlanned ? sp.aportesPendentes : 0;
+  const pode = sp.livreFinal;
+  const flowParts = [
+    { label: 'Contas para pagar', value: sp.compromissos, color: COLORS.contas },
+    { label: 'Já separado para metas', value: sp.separado, color: COLORS.separado },
+    { label: 'Guardar para minha meta', value: guardar, color: COLORS.guardar },
+    { label: 'Pode gastar', value: Math.max(0, pode), color: COLORS.livre },
+  ];
   const todo = [];
-  if (sp.overdue.length) todo.push({ ico: '⚠', text: `${sp.overdue.length} conta(s) vencida(s) sem pagamento registrado`, action: () => go('movimentacoes/calendario'), label: 'Ver' });
-  if (incomesToConfirm.length) todo.push({ ico: '↓', text: `${incomesToConfirm.length} recebimento(s) previsto(s) para confirmar`, action: () => document.getElementById('a-receber')?.scrollIntoView({ behavior: 'smooth' }), label: 'Confirmar' });
-  if (!data.plan) todo.push({ ico: '✦', text: 'Organize seu dinheiro: veja quanto destinar para cada coisa', action: () => go('plano/organizar'), label: 'Organizar' });
-  else if (stale.length) todo.push({ ico: '↻', text: `Plano desatualizado: ${stale[0]}`, action: () => go('plano/organizar'), label: 'Revisar' });
-  if (guardar > 0) todo.push({ ico: '◆', text: `Separar ${brl(guardar)} para suas metas este mês`, action: () => open('guardei'), label: 'Guardar' });
-  if (sp.unknown.length) todo.push({ ico: '?', text: `Informe o saldo de ${sp.unknown.map((a) => a.name).join(', ')}`, action: () => go('perfil/contas'), label: 'Atualizar' });
+  if (sp.overdue.length) todo.push({ ico: 'alerta', text: `${sp.overdue.length} conta(s) vencida(s) sem pagamento registrado`, action: () => go('movimentacoes/calendario'), label: 'Ver' });
+  const toConfirm = sp.incomes.filter((i) => i.date <= today);
+  if (toConfirm.length) todo.push({ ico: 'entrada', text: `${toConfirm.length} recebimento(s) previsto(s) para confirmar`, action: () => document.getElementById('proximos')?.setAttribute('open', ''), label: 'Ver' });
+  if (data.plan && stale.length) todo.push({ ico: 'fixos', text: `Plano desatualizado: ${stale[0]}`, action: () => go('plano/organizar'), label: 'Revisar' });
+  if (sp.unknown.length) todo.push({ ico: 'contas', text: `Informe o saldo de ${sp.unknown.map((a) => a.name).join(', ')}`, action: () => go('perfil/contas'), label: 'Atualizar' });
 
-  const togglePlanned = async () => {
-    await put('/profile', { include_planned_contributions: !sp.includePlanned });
-    await reload();
-  };
+  const planView = usage && !stale.length;
+  const rows = planView
+    ? usage.items.filter((i) => i.amount_cents > 0).map((i) => {
+      const s = sug.items.find((x) => x.id === i.ref_id) || {};
+      return { it: { ...s, name: i.name, icon: i.icon, type: i.type, color: i.color }, used: i.used, planned: i.amount_cents };
+    })
+    : sug.items.filter((i) => i.amount > 0).map((i) => ({ it: i }));
 
   return (
     <>
-      <TopBar title={`Olá, ${name}`} subtitle={`${formatBR(today)} · até ${formatBR(sp.period.end)}`} />
-      <div className="tiles">
-        <Tile main label="Posso gastar" value={sp.livreFinal} tone={sp.livreFinal < 0 ? 'neg' : 'pos'}
-          sub={sp.livreFinal < 0 ? `Faltam ${brl(-sp.livreFinal)} até ${formatBR(sp.period.end)}` : `até ${formatBR(sp.period.end)} · cerca de ${brl(sp.daily)} por dia`}
-          explain={
-            <>
-              <p>Tenho agora {brl(sp.saldoBase)} − já comprometido {brl(comprometido)}{sp.includePlanned ? ` − preciso guardar ${brl(guardar)}` : ''} = <b>{brl(sp.livreFinal)}</b>.</p>
-              <p>É o dinheiro livre até {sp.period.reason === 'proxima_renda' ? `a véspera da próxima renda (${formatBR(sp.period.nextIncome)})` : 'o fim do mês'}. Gastos já pagos já saíram do saldo e não são descontados de novo.</p>
-              <button className="btn small" onClick={togglePlanned}>{sp.includePlanned ? 'Não descontar o “preciso guardar”' : 'Descontar o “preciso guardar”'}</button>
-            </>
-          } />
-        <Tile label="Tenho agora" value={sp.saldoBase} sub="já recebido, nas contas de gasto"
-          explain={<>Soma do saldo de {sp.spendAccounts.map((a) => a.name).join(', ')}. Só conta dinheiro que já entrou: recebimentos previstos ({brl(sp.incomesTotal)}) ficam separados. Reservas e investimentos ({brl(sp.totals.reservado + sp.totals.investido)}) não entram.{sp.unknown.length ? ' Atenção: há conta com saldo desconhecido.' : ''}</>} />
-        <Tile label="Já comprometido" value={comprometido} sub={`contas ${brl(sp.compromissos)} · separado ${brl(sp.separado)}`}
-          explain={<>Contas a pagar até {formatBR(sp.period.end)} ({billsBefore.length}) somam {brl(sp.compromissos)}. Dinheiro que você já separou para metas nessas contas: {brl(sp.separado)}.</>} />
-        <Tile wide label="Preciso guardar" value={guardar} sub={guardar > 0 ? 'neste mês, para as metas' : 'aportes do mês em dia'}
-          explain={<>{goalsM.filter((m) => m.pendingThisMonth > 0 && m.status !== 'vencida').map((m) => `${m.goal.name}: ${brl(m.pendingThisMonth)}`).join(' · ') || 'Nenhum aporte pendente neste mês.'}</>} />
-      </div>
+      <TopBar title={`Olá, ${name}`} subtitle={`${formatBR(today)} · seu dinheiro até ${formatBR(sp.period.end)}`} />
+
+      <section className="hero" aria-labelledby="pode-h">
+        <div className="label" id="pode-h">{pode < 0 ? 'Faltam para fechar o período' : 'Pode gastar'}</div>
+        <div className={`big-value ${pode < 0 ? 'neg' : ''}`}><AnimatedMoney c={Math.abs(pode)} /></div>
+        <p className="sub">
+          {pode < 0 ? `Suas contas e metas até ${formatBR(sp.period.end)} passam do que você tem. Veja as opções em Meu plano.`
+            : `até ${formatBR(sp.period.end)} · cerca de ${brl(sp.daily)} por dia`}
+        </p>
+      </section>
+
+      <section className="card flow">
+        <h2>Para onde vai o dinheiro</h2>
+        <div style={{ margin: '14px 0 4px' }}><SplitBar parts={flowParts} label="Dinheiro disponível" /></div>
+        <div className="flow-rows">
+          <FlowRow color="var(--text)" total title="1. Quanto tenho disponível" sub="dinheiro que já entrou nas contas de gasto" value={sp.saldoBase}
+            explain={<>Soma de {sp.spendAccounts.map((a) => a.name).join(', ')}. Recebimentos previstos ({brl(sp.incomesTotal)}) só entram quando você confirma. Reservas e investimentos ({brl(sp.totals.reservado + sp.totals.investido)}) ficam fora.{sp.unknown.length ? ' Há conta com saldo desconhecido.' : ''}</>} />
+          <FlowRow color={COLORS.contas} title="2. Reservado para contas" sub={`${sp.bills.length} conta(s) até ${formatBR(sp.period.end)}`} value={sp.compromissos}
+            explain={<>Contas a pagar até a véspera {sp.period.nextIncome ? `do próximo recebimento (${formatBR(sp.period.nextIncome)})` : 'do fim do mês'}. Contas já pagas saíram do saldo e não contam de novo.</>} />
+          {sp.separado > 0 && <FlowRow color={COLORS.separado} title="Já separado no app" sub="para metas, nessas contas" value={sp.separado}
+            explain="Separar no app é planejamento: o dinheiro continua na conta, só deixa de aparecer como livre. Nada é transferido no banco." />}
+          {guardar > 0 && <FlowRow color={COLORS.guardar} title="Guardar para minha meta" sub="o que falta separar neste mês" value={guardar}
+            explain={<>Aporte que falta neste mês para seguir o plano das metas. <button className="btn small" onClick={async () => { await put('/profile', { include_planned_contributions: false }); await reload(); }}>Não descontar daqui</button></>} />}
+          <FlowRow color={COLORS.livre} total title="3. Quanto posso gastar" sub="depois das contas e das metas" value={pode}
+            explain={<>Tenho {brl(sp.saldoBase)} − contas {brl(sp.compromissos)} − separado {brl(sp.separado)}{guardar ? ` − guardar ${brl(guardar)}` : ''} = {brl(pode)}.{!sp.includePlanned && <> <button className="btn small" onClick={async () => { await put('/profile', { include_planned_contributions: true }); await reload(); }}>Descontar o aporte das metas</button></>}</>} />
+        </div>
+      </section>
+
+      <section className="section" aria-labelledby="div-h">
+        <div className="row between wrap">
+          <h2 id="div-h">4. {planView ? 'Seu plano' : 'Sua divisão sugerida'}</h2>
+          <span className="hint">{planView ? `até ${formatBR(data.plan.period_end)}` : `estilo ${B.STYLES[sug.style].label.toLowerCase()}`}</span>
+        </div>
+        <p className="hint" style={{ marginTop: 6 }}>
+          {planView ? 'Quanto você planejou, quanto já usou e quanto resta em cada coisa.'
+            : sug.available < 0 ? `Faltam ${brl(-sug.available)} só para as contas; não há o que dividir agora.`
+              : `Como dividir os ${brl(sug.pool)} livres depois das contas, com base nos seus gastos e metas. Toque para ver o porquê.`}
+        </p>
+        <div className="card division">
+          {!rows.length && <p className="empty">Registre alguns gastos ou responda às perguntas em Meu plano para o app sugerir valores.</p>}
+          {rows.map((r) => <DivisionRow key={`${r.it.type}:${r.it.id || r.it.name}`} {...r} />)}
+          {!planView && sug.livre > 0 && (
+            <div className="div-row"><div className="top" style={{ cursor: 'default' }}><span className="ic" aria-hidden="true">·</span><span className="name">Livre para outras coisas</span><span className="val">{brl(sug.livre)}</span></div></div>
+          )}
+        </div>
+        {!planView && sug.totalShort > 0 && sug.available >= 0 && <p className="hint warn" style={{ marginTop: 8 }}>Não cobre tudo: faltam {brl(sug.totalShort)} para o costume e as metas. Ajuste valores ou simule outra divisão.</p>}
+        {showStyles && (
+          <div style={{ marginTop: 12 }}>
+            <Seg value={sug.style} onChange={setStyle} label="Estilo de divisão" options={Object.entries(B.STYLES).map(([k, v]) => [k, v.label])} />
+            <p className="hint" style={{ marginTop: 6 }}>{B.STYLES[sug.style].desc}</p>
+          </div>
+        )}
+        <div className="actions-bar">
+          {!planView && <button className="btn primary" disabled={sug.available < 0 || !rows.length} onClick={() => setApply(true)}>Aplicar plano</button>}
+          <button className="btn" onClick={() => go('plano/organizar', style ? { style } : null)}>Ajustar valores</button>
+          {!planView && <button className="btn" onClick={() => setShowStyles(!showStyles)} aria-expanded={showStyles}>Simular outra divisão</button>}
+          {planView && <button className="btn" onClick={() => go('plano/assistente')}>Perguntar ao assistente</button>}
+        </div>
+      </section>
 
       {todo.length > 0 && (
-        <>
-          <div className="section-title"><h2>O que fazer agora</h2></div>
-          <div className="stack">
-            {todo.slice(0, 4).map((t, i) => (
+        <section className="section">
+          <h2>Para fazer</h2>
+          <div className="card" style={{ marginTop: 12, paddingTop: 6, paddingBottom: 6 }}>
+            {todo.map((t, i) => (
               <div className="todo" key={i}>
-                <span className="ico" aria-hidden="true">{t.ico}</span>
+                <span className="ico"><Icon name={t.ico} size={18} /></span>
                 <div className="grow">{t.text}</div>
                 <button className="btn small" onClick={t.action}>{t.label}</button>
               </div>
             ))}
           </div>
-        </>
+        </section>
       )}
 
-      <div className="grid two section">
-        <section className="card">
-          <div className="card-h">
-            <h2>Até {sp.period.nextIncome ? `o próximo recebimento` : 'o fim do mês'}</h2>
-            <span className="chip">{sp.period.nextIncome ? formatBR(sp.period.nextIncome) : formatBR(sp.period.end)}</span>
+      <section className="section">
+        <details className="more" id="proximos" open={toConfirm.length > 0 || sp.overdue.length > 0}>
+          <summary>Próximos dias · {sp.bills.length} conta(s), {sp.incomes.length} recebimento(s) previsto(s)</summary>
+          <div className="inner">
+            <div>
+              <h3>Contas até {formatBR(sp.period.end)} <span className="muted">({brl(sp.compromissos)})</span></h3>
+              {!sp.bills.length && <p className="hint">Nenhuma conta até lá.</p>}
+              <div className="list">{sp.bills.slice(0, 8).map((b) => <BillItem key={b.id} b={b} cats={cats} today={today} onPay={pay} />)}</div>
+            </div>
+            <div>
+              <h3>A receber — ainda não conta no saldo <span className="muted">({brl(sp.incomesTotal)})</span></h3>
+              {!sp.incomes.length && <p className="hint">Nenhum recebimento previsto até lá.</p>}
+              <div className="list">{sp.incomes.slice(0, 6).map((i) => <BillItem key={i.id} b={i} cats={cats} today={today} onPay={i.date <= today ? pay : null} payLabel="Recebi" />)}</div>
+            </div>
           </div>
-          <p className="muted">Contas que vencem antes ({brl(sp.compromissos)})</p>
-          {!billsBefore.length && <p className="empty">Nenhuma conta até lá. 🎉</p>}
-          <div className="list">{billsBefore.slice(0, 6).map((b) => <BillItem key={b.id} b={b} cats={cats} today={today} onPay={pay} />)}</div>
-          {billsBefore.length > 6 && <button className="btn small ghost" onClick={() => go('movimentacoes/calendario')}>Ver todas ({billsBefore.length})</button>}
-          <hr />
-          <p className="muted" id="a-receber">A receber — ainda não conta no saldo ({brl(sp.incomesTotal)})</p>
-          {!sp.incomes.length && <p className="hint">Nenhum recebimento previsto até lá.</p>}
-          <div className="list">{sp.incomes.slice(0, 5).map((i) => <BillItem key={i.id} b={i} cats={cats} today={today} onPay={i.date <= today ? pay : null} payLabel="Recebi" />)}</div>
-        </section>
-
-        <section className="card">
-          <div className="card-h"><h2>Seu plano</h2><button className="btn small ghost" onClick={() => go('plano/organizar')}>{data.plan ? 'abrir' : 'criar'}</button></div>
-          {!usage ? (
-            <div className="stack">
-              <p className="muted">Divida o dinheiro livre entre o que importa (transporte, comida, passeios, metas). O app sugere valores com base nos seus gastos.</p>
-              <button className="btn primary" onClick={() => go('plano/organizar')}>Organizar meu dinheiro</button>
-            </div>
-          ) : (
-            <div className="stack">
-              {usage.items.filter((i) => i.type === 'categoria' && i.amount_cents > 0).slice(0, 4).map((i) => (
-                <div key={i.ref_id}>
-                  <div className="row between"><span>{i.icon} {i.name}</span><span className="num">{i.left >= 0 ? `restam ${brl(i.left)}` : <span className="bad">passou {brl(-i.left)}</span>}</span></div>
-                  <Progress value={i.amount_cents ? i.used / i.amount_cents : 1} tone={i.left < 0 ? 'bad' : i.used / Math.max(1, i.amount_cents) > 0.8 ? 'warn' : ''} />
-                </div>
-              ))}
-              {goalsM[0] && (
-                <div>
-                  <div className="row between"><span>🎯 {goalsM[0].goal.name}</span><span className="num">{Math.round(goalsM[0].progress * 100)}%</span></div>
-                  <Progress value={goalsM[0].progress} />
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      </div>
+        </details>
+      </section>
+      {apply && <ApplyPlanModal sug={sug} onClose={() => setApply(false)} />}
     </>
   );
 }

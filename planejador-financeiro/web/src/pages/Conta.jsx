@@ -72,7 +72,7 @@ export default function Conta() {
               </Field>
               <Field label="Recebe renda variável?" full><Seg value={f.variable} onChange={set('variable')} options={[['sim', 'Sim'], ['nao', 'Não'], ['nao_sei', 'Não sei']]} /></Field>
               {f.variable === 'sim' && <Field label="Estimativa mensal (opcional)" full hint="Usada só enquanto houver pouco histórico."><MoneyInput value={f.est} onChange={set('est')} /></Field>}
-              <Field label="Tema" full><Seg value={f.theme} onChange={set('theme')} options={[['escuro', 'Escuro'], ['claro', 'Claro'], ['sistema', 'Do sistema']]} /></Field>
+              <Field label="Tema" full><Seg value={f.theme} onChange={set('theme')} options={[['claro', 'Claro (marfim)'], ['escuro', 'Escuro'], ['sistema', 'Do sistema']]} /></Field>
             </div>
             <p className="hint">Renda fixa e contas fixas são editadas em Lançamentos → Recorrentes. Saldos, em Meu dinheiro. Metas, em Minhas metas. Categorias e limites, em Lançamentos → Orçamento.</p>
             {profile.error && <p className="err">{profile.error}</p>}

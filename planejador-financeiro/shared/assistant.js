@@ -4,16 +4,30 @@
 import { addDays, dayOfWeek, formatBR, diffDays } from './dates.js';
 import { formatBRL as fmt } from './money.js';
 import { spendable, canIBuy, suggestSplit, planner, mainGoal, DIAS_POR_MES } from './calc.js';
-import { suggestBudget, budgetUsage, completeness, itemKey } from './budget.js';
+import { suggestBudget, budgetUsage, completeness, itemKey, splitNewIncome, STYLES } from './budget.js';
 
 export const SHORTCUTS = [
-  { id: 'fimdesemana', label: 'Quanto posso gastar neste fim de semana?' },
+  { id: 'montar', label: 'Monte meu orçamento até o próximo pagamento' },
+  { id: 'uber', label: 'Quanto posso gastar de Uber este mês?' },
+  { id: 'fimdesemana', label: 'Dá para sair neste fim de semana?' },
+  { id: 'recebi', label: 'Recebi R$ ___, como divido?', needs: ['amount'] },
+  { id: 'diminuir', label: 'Onde posso diminuir para guardar mais?' },
   { id: 'possogastar', label: 'Posso gastar R$ ___ agora?', needs: ['amount'] },
-  { id: 'recebi', label: 'Recebi R$ ___, como posso dividir?', needs: ['amount'] },
   { id: 'passeios', label: 'Quanto posso reservar para sair com minha namorada?' },
   { id: 'meta', label: 'Se eu fizer essa compra, atrasa minha meta?', needs: ['amount'] },
-  { id: 'ajustar', label: 'Como ajustar meu mês sem cortar todo o lazer?' },
 ];
+
+const TRANSP = /uber|99|t[aá]xi|transporte|corrida/i;
+
+// Junta o plano atual (ou a sugestão) com os acréscimos de uma entrada nova, no formato do POST /plans.
+export function mergePlanItems(base, adds) {
+  const m = new Map(base);
+  for (const a of adds) m.set(a.key, (m.get(a.key) || 0) + a.amount);
+  return [...m.entries()].filter(([, v]) => v > 0).map(([k, v]) => {
+    const [type, ref_id] = k.split(':');
+    return { type, ref_id, amount_cents: v, locked: false };
+  });
+}
 
 const LAZER = /namor|passeio|encontro|date|lazer|rol[eê]|sa[ií]da/i;
 
@@ -102,25 +116,74 @@ export function ask(state, today, id, input = {}) {
   if (id === 'recebi') {
     if (!amount) return { ...b, needs: 'amount', answer: 'Quanto você recebeu?' };
     const acc = sp.spendAccounts[0];
-    const s = suggestSplit(state, today, amount, { countedInBase: 0 });
-    const contributions = [];
-    if (s.reserva > 0 && s.reserveGoal) contributions.push({ goal_id: s.reserveGoal.id, name: s.reserveGoal.name, amount_cents: s.reserva });
-    for (const m of s.metas) if (m.amount > 0) contributions.push({ goal_id: m.goal_id, name: m.name, amount_cents: m.amount });
-    const preview = [`Registrar entrada de ${fmt(amount)} em ${acc.name} (recebida hoje)`, ...contributions.map((c) => `Separar ${fmt(c.amount_cents)} para “${c.name}”`), `Deixar ${fmt(s.livre + s.contas)} no saldo (${fmt(s.contas)} para contas e ${fmt(s.livre)} livres)`];
+    const r = splitNewIncome(state, today, amount);
+    const items = mergePlanItems(r.planned, r.adds);
+    const lines = r.adds.map((a) => `${a.icon || ''} ${a.name}: +${fmt(a.amount)}`);
     return {
       ...b, value: amount,
-      answer: `Sugestão: ${fmt(s.contas)} para contas, ${fmt(s.reserva)} para a reserva, ${fmt(s.metas.reduce((x, m) => x + m.amount, 0))} para metas e ${fmt(s.livre)} livres.`,
-      reason: s.explain.join(' '),
+      answer: r.adds.length
+        ? `Sugestão para os ${fmt(amount)}: ${r.adds.map((a) => `${fmt(a.amount)} para ${a.name}`).join(', ')}${r.billGap ? `, ${fmt(r.billGap)} para cobrir contas` : ''} e ${fmt(r.livre)} livres.`
+        : `${r.billGap ? `${fmt(r.billGap)} cobrem contas que estavam descobertas e ` : ''}${fmt(r.livre)} ficam livres: ${r.base === 'plano' ? 'seu plano já cobria tudo' : 'suas necessidades e metas já estavam cobertas'}.`,
+      reason: `Considerei ${r.base === 'plano' ? 'seu plano salvo' : 'a divisão sugerida'} e só completei o que faltava; nada que já estava reservado foi reservado de novo. ${r.adds.map((a) => `${a.name}: ${a.reason}`).join(' ')}`,
       action: {
-        type: 'apply', label: 'Registrar e separar', preview,
-        request: {
-          method: 'POST', path: '/transactions',
-          body: {
-            items: [{ kind: 'receita', amount_cents: amount, date: today, account_id: acc.id, status: 'realizado', description: 'Entrada (assistente)' }],
-            contributions: contributions.map((c) => ({ goal_id: c.goal_id, account_id: acc.id, amount_cents: c.amount_cents, date: today, source: 'divisao' })),
-          },
-        },
+        type: 'apply', label: 'Registrar entrada e atualizar plano',
+        preview: [`Registrar ${fmt(amount)} como dinheiro que entrou hoje em ${acc.name}`, ...lines, `${fmt(r.livre)} ficam livres`, 'É só planejamento no app: nada é transferido no banco.'],
+        requests: [
+          { method: 'POST', path: '/transactions', body: { kind: 'receita', amount_cents: amount, date: today, account_id: acc.id, status: 'realizado', description: 'Entrada (assistente)' } },
+          { method: 'POST', path: '/plans', body: { items } },
+        ],
       },
+    };
+  }
+
+  if (id === 'uber') {
+    const cats = state.categories.filter((c) => !c.archived);
+    const cat = input.categoryId ? cats.find((c) => c.id === input.categoryId) : cats.find((c) => TRANSP.test(c.name));
+    if (!cat) return { ...b, needs: 'category', answer: 'Em qual categoria você registra o Uber?', options: cats.map((c) => ({ id: c.id, label: `${c.icon || ''} ${c.name}` })) };
+    const sug = suggestBudget(state, today);
+    const it = sug.items.find((i) => i.key === itemKey('categoria', cat.id));
+    if (!it.need && it.source === 'nada') {
+      return { ...b, needs: 'estimate', category: cat, answer: `Para calcular, me conte: quantas viagens de ${cat.name} por semana e quanto custa cada uma, em média?` };
+    }
+    const planIt = state.plan && budgetUsage(state, state.plan).items.find((i) => i.type === 'categoria' && i.ref_id === cat.id);
+    const value = planIt ? Math.max(0, planIt.left) : it.amount;
+    return {
+      ...b, value,
+      answer: planIt
+        ? `No seu plano, ainda há ${fmt(Math.max(0, planIt.left))} para ${cat.name} até ${formatBR(state.plan.period_end)}.`
+        : `Até ${formatBR(sug.period.end)} você pode usar ${fmt(it.amount)} em ${cat.name}${it.short ? ` (o costume seria ${fmt(it.need)}, faltam ${fmt(it.short)})` : ''}.`,
+      reason: `${it.reason} Desde ${formatBR(sug.cycleStart)} você já gastou ${fmt(it.spent)} aqui.${cat.essential ? ' Como é essencial, ela é coberta antes de lazer e metas.' : ''}`,
+      action: { type: 'navigate', to: 'plano/organizar', label: 'Ver a divisão completa' },
+    };
+  }
+
+  if (id === 'montar') {
+    const sug = suggestBudget(state, today);
+    if (sug.available < 0) {
+      return { ...b, value: sug.available, answer: `Faltam ${fmt(-sug.available)} para as contas até ${formatBR(sug.period.end)}; ainda não dá para dividir.`, reason: 'Opções: confirmar algum recebimento previsto, adiar uma conta, usar a reserva ou registrar um valor extra que entrar.', action: { type: 'navigate', to: 'inicio', label: 'Ver contas' } };
+    }
+    const top = sug.items.filter((i) => i.amount > 0).sort((a, x) => x.amount - a.amount).slice(0, 6);
+    return {
+      ...b, value: sug.distributed,
+      answer: `Proposta até ${formatBR(sug.period.end)}: ${top.map((i) => `${i.name} ${fmt(i.amount)}`).join(' · ')}${sug.livre ? ` · livre ${fmt(sug.livre)}` : ''}.`,
+      reason: `Cabe nos ${fmt(sug.pool)} disponíveis depois das contas. Estilo: ${STYLES[sug.style].label} — ${STYLES[sug.style].desc}${sug.totalShort ? ` Não cobre tudo: faltam ${fmt(sug.totalShort)} para o costume e as metas.` : ''}`,
+      action: { type: 'navigate', to: 'plano/organizar', label: 'Revisar e aplicar' },
+    };
+  }
+
+  if (id === 'diminuir') {
+    const sug = suggestBudget(state, today);
+    const flex = sug.items.filter((i) => i.type === 'categoria' && !i.essential && i.need > 0).sort((a, x) => x.need - a.need);
+    const goal = sug.items.find((i) => i.type === 'meta');
+    if (!flex.length) return { ...b, value: 0, answer: 'Não encontrei gastos flexíveis registrados para reduzir.', reason: 'Registre seus gastos por alguns dias ou informe estimativas nas categorias para eu sugerir onde ajustar.' };
+    const cuts = flex.slice(0, 3).map((i) => ({ i, cut: Math.round(i.need * 0.25) })).filter((c) => c.cut >= 100);
+    const total = cuts.reduce((x, c) => x + c.cut, 0);
+    const ref = goal?.metrics?.planMonthly || goal?.metrics?.perMonth || 0;
+    return {
+      ...b, value: total,
+      answer: `Reduzindo um quarto em ${cuts.map((c) => `${c.i.name} (−${fmt(c.cut)})`).join(', ')}, sobram ${fmt(total)} a mais até ${formatBR(sug.period.end)}.`,
+      reason: `Só sugeri categorias flexíveis, mantendo 75% do que você costuma gastar nelas — lazer continua no orçamento.${goal && ref ? ` Colocando isso em “${goal.name}”, a meta adianta cerca de ${Math.ceil((total / ref) * DIAS_POR_MES)} dia(s).` : ''}`,
+      action: { type: 'navigate', to: 'plano/organizar', style: 'guardar', label: 'Simular divisão “Guardar mais”' },
     };
   }
 

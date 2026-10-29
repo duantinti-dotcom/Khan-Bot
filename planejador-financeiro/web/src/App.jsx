@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { get, post } from './api.js';
-import { ToastProvider, Modal } from './ui.jsx';
+import { ToastProvider, Modal, Icon } from './ui.jsx';
 import * as C from '@shared/calc.js';
 import Auth from './pages/Auth.jsx';
 import Onboarding from './pages/Onboarding.jsx';
@@ -20,18 +20,18 @@ export const useApp = () => useContext(Ctx);
 
 // Navegação principal: quatro áreas. Configurações, categorias e contas ficam no perfil.
 const PAGES = [
-  ['inicio', 'Início', '◎', Home],
-  ['movimentacoes', 'Movimentações', '⇅', Movimentacoes],
-  ['plano', 'Meu plano', '✦', Plano],
-  ['metas', 'Metas', '◆', Metas],
-  ['perfil', 'Perfil', '☺', Perfil],
+  ['inicio', 'Início', 'inicio', Home],
+  ['movimentacoes', 'Movimentações', 'mov', Movimentacoes],
+  ['plano', 'Meu plano', 'plano', Plano],
+  ['metas', 'Metas', 'metas', Metas],
+  ['perfil', 'Perfil', 'perfil', Perfil],
 ];
 const MODALS = { recebi: Recebi, gastei: Gastei, guardei: Guardei, transferir: Transferir, comprar: Comprar };
 
 function applyTheme(theme) {
-  const t = theme === 'sistema' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'claro' : 'escuro') : theme || 'escuro';
+  const t = theme === 'sistema' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'claro' : 'escuro') : theme || 'claro';
   document.documentElement.dataset.theme = t;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'claro' ? '#f3f6fb' : '#070b14');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'claro' ? '#f6f2e9' : '#17181c');
 }
 
 function routeFromHash() {
@@ -45,19 +45,19 @@ function routeFromHash() {
 
 function NewSheet({ onPick, onClose }) {
   const opts = [
-    ['recebi', '↓', 'Entrada', 'Dinheiro que recebi ou vou receber'],
-    ['gastei', '↑', 'Gasto', 'Compra, conta ou despesa'],
-    ['transferir', '⇄', 'Transferência', 'Entre minhas contas'],
-    ['guardei', '◆', 'Guardar', 'Separar para uma meta'],
+    ['recebi', 'entrada', 'Entrada', 'Dinheiro que entrou ou vai entrar'],
+    ['gastei', 'gasto', 'Gasto', 'Compra, conta ou despesa'],
+    ['transferir', 'transf', 'Transferência', 'Entre minhas contas'],
+    ['guardei', 'guardar', 'Guardar', 'Separar no app para uma meta'],
   ];
   return (
     <Modal title="Registrar" onClose={onClose}>
       <div className="new-grid">
         {opts.map(([k, ico, l, d]) => (
-          <button key={k} className="btn" onClick={() => onPick(k)}><span className="ico" aria-hidden="true">{ico}</span>{l}<small>{d}</small></button>
+          <button key={k} className="btn" onClick={() => onPick(k)}><span className="ico"><Icon name={ico} /></span>{l}<small>{d}</small></button>
         ))}
       </div>
-      <button className="btn block ghost" style={{ marginTop: 10 }} onClick={() => onPick('comprar')}>? Simular uma compra antes</button>
+      <button className="btn block ghost" style={{ marginTop: 10 }} onClick={() => onPick('comprar')}>Simular uma compra antes</button>
     </Modal>
   );
 }
@@ -66,17 +66,16 @@ function Celebrate({ goal, onClose }) {
   const bits = useMemo(() => Array.from({ length: 18 }, (_, i) => ({
     dx: `${Math.round(Math.cos((i / 18) * Math.PI * 2) * (120 + (i % 3) * 40))}px`,
     dy: `${Math.round(Math.sin((i / 18) * Math.PI * 2) * (120 + (i % 4) * 30))}px`,
-    bg: ['#22d3ee', '#34d399', '#fbbf24', '#f472b6'][i % 4],
+    bg: ['#2347c6', '#2f7a57', '#c08a3e', '#8a6bb8'][i % 4],
   })), []);
   useEffect(() => { const t = setTimeout(onClose, 6000); return () => clearTimeout(t); }, [onClose]);
   return (
     <div className="celebrate" role="status">
       {bits.map((b, i) => <i key={i} style={{ '--dx': b.dx, '--dy': b.dy, background: b.bg }} />)}
       <div className="card">
-        <div style={{ fontSize: '2.4rem' }} aria-hidden="true">🎉</div>
-        <h2>Meta atingida!</h2>
+        <h2>Meta atingida</h2>
         <p className="muted">“{goal.name}” chegou no valor que você queria.</p>
-        <button className="btn primary" onClick={onClose}>Show!</button>
+        <button className="btn primary" onClick={onClose}>Continuar</button>
       </div>
     </div>
   );
@@ -146,7 +145,7 @@ export default function App() {
   const close = useCallback(() => setModal(null), []);
   const logout = useCallback(async () => {
     try { await post('/auth/logout'); } catch { /* sessão já encerrada */ }
-    setMe(null); setData(null); applyTheme('escuro');
+    setMe(null); setData(null); applyTheme('claro');
     location.hash = '#/inicio';
   }, []);
 
@@ -179,7 +178,7 @@ export default function App() {
     const p = PAGES.find((x) => x[0] === k);
     return (
       <button key={k} className={route.page === k ? 'active' : ''} onClick={() => go(k)} aria-current={route.page === k ? 'page' : undefined}>
-        <span className="ico" aria-hidden="true">{p[2]}</span>{k === 'plano' ? 'Plano' : k === 'movimentacoes' ? 'Movimentos' : p[1]}
+        <span className="ico"><Icon name={p[2]} /></span>{k === 'plano' ? 'Plano' : k === 'movimentacoes' ? 'Movimentos' : p[1]}
       </button>
     );
   };
@@ -191,12 +190,12 @@ export default function App() {
             <div className="brand"><img src="/icon.svg" alt="" />Órbita</div>
             {PAGES.map(([k, l, ico]) => (
               <button key={k} className={`navlink ${route.page === k ? 'active' : ''}`} onClick={() => go(k)} aria-current={route.page === k ? 'page' : undefined}>
-                <span className="ico" aria-hidden="true">{ico}</span>{l}
+                <span className="ico"><Icon name={ico} size={20} /></span>{l}
               </button>
             ))}
             <div className="spacer" />
             <button className="btn primary block" onClick={() => open('novo')}>+ Registrar</button>
-            <button className="navlink" onClick={logout}><span className="ico" aria-hidden="true">⎋</span>Sair</button>
+            <button className="navlink" onClick={logout}><span className="ico"><Icon name="sair" size={20} /></span>Sair</button>
           </aside>
           <main className="main">
             <div className="page" key={`${route.page}/${route.sub}`}>
@@ -206,7 +205,7 @@ export default function App() {
           <nav className="tabbar" aria-label="Navegação principal">
             {tab('inicio')}
             {tab('movimentacoes')}
-            <div className="tab-plus"><button className="fab" onClick={() => open('novo')} aria-label="Registrar entrada, gasto, transferência ou aporte">+</button></div>
+            <div className="tab-plus"><button className="fab" onClick={() => open('novo')} aria-label="Registrar entrada, gasto, transferência ou aporte"><Icon name="mais" size={26} /></button></div>
             {tab('plano')}
             {tab('metas')}
           </nav>

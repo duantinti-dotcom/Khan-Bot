@@ -9,6 +9,9 @@ import {
 import { todayISO, addDays } from '../shared/dates.js';
 import { splitProportional } from '../shared/money.js';
 import { spendable } from '../shared/calc.js';
+import { suggestBudget, itemKey } from '../shared/budget.js';
+import { ask as askRules } from '../shared/assistant.js';
+import { buildAiContext } from './ai.js';
 
 const SESSION_DAYS = 30;
 const LOGIN_WINDOW_MIN = 15;
@@ -17,15 +20,15 @@ const MAX_FAILS_PER_IP = 30;
 const MAX_SIGNUPS_PER_IP_HOUR = 10;
 
 export const DEFAULT_CATEGORIES = [
-  { name: 'Namoro e passeios', color: '#f472b6', icon: '💞', essential: false },
-  { name: 'Patinete', color: '#a78bfa', icon: '🛴', essential: false },
-  { name: 'Uber e outros transportes', color: '#60a5fa', icon: '🚗', essential: true },
-  { name: 'Alimentação', color: '#34d399', icon: '🍽️', essential: true },
-  { name: 'Assinaturas e ferramentas de IA', color: '#22d3ee', icon: '🤖', essential: false },
-  { name: 'Compras', color: '#fbbf24', icon: '🛍️', essential: false },
-  { name: 'Estudos', color: '#818cf8', icon: '📚', essential: true },
-  { name: 'Saúde', color: '#f87171', icon: '🩺', essential: true },
-  { name: 'Outros', color: '#94a3b8', icon: '•', essential: false },
+  { name: 'Namoro e passeios', color: '#a3648b', icon: '💞', essential: false },
+  { name: 'Patinete', color: '#7468a8', icon: '🛴', essential: false },
+  { name: 'Uber e outros transportes', color: '#5b8bb5', icon: '🚗', essential: true },
+  { name: 'Alimentação', color: '#3f7d6e', icon: '🍽️', essential: true },
+  { name: 'Assinaturas e ferramentas de IA', color: '#4f9aa0', icon: '🤖', essential: false },
+  { name: 'Compras', color: '#c48a3c', icon: '🛍️', essential: false },
+  { name: 'Estudos', color: '#2347c6', icon: '📚', essential: true },
+  { name: 'Saúde', color: '#c0675a', icon: '🩺', essential: true },
+  { name: 'Outros', color: '#7c7f88', icon: '•', essential: false },
 ];
 
 const TABLES = {
@@ -33,7 +36,7 @@ const TABLES = {
   transactions: 'transactions', goals: 'goals', contributions: 'contributions',
 };
 
-export function createApi({ sql, secureCookies = true, cookieName, tz = 'America/Sao_Paulo', now = () => new Date() }) {
+export function createApi({ sql, secureCookies = true, cookieName, tz = 'America/Sao_Paulo', now = () => new Date(), ai = null, aiDailyLimit = 40 }) {
   const COOKIE = cookieName || (secureCookies ? '__Host-fin_sess' : 'fin_sess');
   const today = () => todayISO(tz, now());
 
@@ -279,12 +282,12 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
 
   async function loadAll(userId) {
     const [profile] = await sql`SELECT display_name, birth_date, onboarding_done, budget_mode, include_planned_contributions,
-      has_variable_income, variable_income_estimate_cents, risk_tolerance, theme, sim_yield_annual, sim_inflation_annual,
+      has_variable_income, variable_income_estimate_cents, risk_tolerance, theme, sim_yield_annual, sim_inflation_annual, budget_style,
       created_on AS created_at, updated_at FROM fin.profiles WHERE user_id = ${userId}`;
     const [accounts, categories, recurrences, transactions, goals, contributions] = await Promise.all([
       sql`SELECT id, name, kind, institution, purpose, liquidity, maturity_date, est_yield_note, initial_cents, balance_known,
           archived, created_at, updated_at FROM fin.accounts WHERE user_id = ${userId} ORDER BY created_at`,
-      sql`SELECT id, name, color, icon, monthly_limit_cents, essential, archived, sort FROM fin.categories WHERE user_id = ${userId} ORDER BY sort, name`,
+      sql`SELECT id, name, color, icon, monthly_limit_cents, essential, archived, sort, estimate_weekly_cents, estimate_note FROM fin.categories WHERE user_id = ${userId} ORDER BY sort, name`,
       sql`SELECT id, kind, amount_cents, account_id, category_id, description, frequency, day_of_month, start_date, end_date,
           active, is_main_income, estimated, note, created_at FROM fin.recurrences WHERE user_id = ${userId} ORDER BY created_at`,
       sql`SELECT id, kind, amount_cents, date, account_id, to_account_id, category_id, description, status, recurrence_id,
@@ -703,6 +706,60 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
     return json({ ok: true });
   }
 
+
+  // ------------------------------------------------------------ assistente com IA
+
+  async function aiStatus() {
+    return json({ configured: !!ai });
+  }
+
+  async function aiAsk(req, user) {
+    const b = await body(req);
+    const question = typeof b.question === 'string' ? b.question.trim().slice(0, 500) : '';
+    const shortcut = typeof b.shortcut === 'string' ? b.shortcut.slice(0, 30) : null;
+    if (!question && !shortcut) throw new HttpError(400, 'Escreva sua pergunta.');
+    const input = {
+      amount: Number.isSafeInteger(b.amount_cents) && b.amount_cents > 0 ? b.amount_cents : undefined,
+      categoryId: isUUID(b.category_id) ? b.category_id : undefined,
+    };
+    const style = ['equilibrado', 'lazer', 'guardar'].includes(b.style) ? b.style : undefined;
+    const state = await loadAll(user.id);
+    const t = today();
+    const rules = shortcut ? askRules(state, t, shortcut, input) : null;
+    const rulesText = rules && !rules.needs ? `${rules.answer} ${rules.reason || ''} ${rules.period || ''}`.trim() : null;
+    if (!ai) return json({ configured: false, rules: rulesText });
+    const key = `ai:${user.id}`;
+    const [{ n }] = await sql`SELECT count(*)::int AS n FROM fin.auth_attempts WHERE key = ${key} AND at > now() - interval '1 day'`;
+    if (n >= aiDailyLimit) throw new HttpError(429, 'Limite diário de perguntas à IA atingido. O planejador numérico continua funcionando.');
+    await sql`INSERT INTO fin.auth_attempts (key, success) VALUES (${key}, true)`;
+    const context = buildAiContext(state, t, { style });
+    let out;
+    try {
+      out = await ai({ context, question: question || rules?.answer || shortcut, rules: rulesText });
+    } catch (e) {
+      console.error('Falha na IA', e?.message);
+      throw new HttpError(502, 'A IA não respondeu agora. Os cálculos do app continuam valendo.', { rules: rulesText });
+    }
+    // Ajustes propostos pela IA viram valores fixados e passam pelo mesmo cálculo do app.
+    let proposal = null, note = null;
+    if (out.ajustes.length) {
+      const base = suggestBudget(state, t, { style });
+      const byName = new Map(base.items.map((i) => [i.name.toLowerCase(), i]));
+      const locked = {};
+      for (const a of out.ajustes) {
+        const it = byName.get(String(a.item || '').toLowerCase().trim());
+        const cents = Math.round(Number(a.valor_reais) * 100);
+        if (it && Number.isFinite(cents) && cents >= 0) locked[itemKey(it.type, it.id)] = cents;
+      }
+      if (Object.keys(locked).length) {
+        const sug = suggestBudget(state, t, { style, locked });
+        if (sug.overLocked > 0) note = `A proposta da IA passava ${(sug.overLocked / 100).toFixed(2).replace('.', ',')} reais do dinheiro disponível e foi descartada.`;
+        else proposal = { locked, items: sug.items.map((i) => ({ key: i.key, name: i.name, amount: i.amount, locked: !!i.locked })), livre: sug.livre, distributed: sug.distributed };
+      }
+    }
+    return json({ configured: true, model: out.model, rules: rulesText, texto: out.texto, pergunta: out.pergunta, proposal, note });
+  }
+
   // ------------------------------------------------------------ roteamento
 
   async function route(req) {
@@ -729,6 +786,8 @@ export function createApi({ sql, secureCookies = true, cookieName, tz = 'America
     if (path === '/profile' && m === 'PUT') return updateProfile(req, user);
     if (path === '/transactions/installments' && m === 'POST') return installments(req, user);
     if (path === '/plans' && m === 'POST') return savePlan(req, user);
+    if (path === '/ai/status' && m === 'GET') return aiStatus();
+    if (path === '/ai/ask' && m === 'POST') return aiAsk(req, user);
     if (path === '/plans/active' && m === 'DELETE') return discardPlan(req, user);
     if (path === '/categories/order' && m === 'PUT') return reorderCategories(req, user);
 

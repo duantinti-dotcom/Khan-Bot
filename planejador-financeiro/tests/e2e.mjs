@@ -28,6 +28,7 @@ const overflowAll = async (page, label) => {
     await page.waitForTimeout(250);
     // Mede contra a largura real da tela: se algo for largo demais, o navegador "afasta o zoom" e innerWidth cresce.
     out[pg] = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, window.innerWidth) - screen.width);
+    if (out[pg] > 0) console.log('LARGO', label, pg, await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > screen.width + 1).slice(-4).map((e) => `${e.tagName}.${e.className} ${Math.round(e.getBoundingClientRect().right)}`).join(' | ')));
     if (['inicio', 'plano/organizar', 'movimentacoes/lista', 'metas', 'perfil'].includes(pg)) await shot(page, `${label}-${pg.replace('/', '-')}`);
   }
   return out;
@@ -71,10 +72,13 @@ try {
   await p.getByRole('button', { name: 'Concluir' }).click();
 
   // ---------- início: quatro números com explicação
-  await p.getByText('Posso gastar').first().waitFor();
-  for (const l of ['Posso gastar', 'Tenho agora', 'Já comprometido', 'Preciso guardar']) await p.getByText(l, { exact: true }).first().waitFor();
-  await p.getByRole('button', { name: 'O que é “Posso gastar”?' }).click();
-  await p.getByText('Tenho agora R$ 350,00').waitFor();
+  await p.locator('#pode-h').waitFor();
+  for (const l of ['Para onde vai o dinheiro', '1. Quanto tenho disponível', '2. Reservado para contas', '3. Quanto posso gastar', '4. Sua divisão sugerida']) await p.getByText(l).first().waitFor();
+  await p.getByRole('button', { name: /3\. Quanto posso gastar/ }).click();
+  await p.getByText('Tenho R$ 350,00', { exact: false }).first().waitFor();
+  for (const b of ['Aplicar plano', 'Ajustar valores', 'Simular outra divisão']) await p.getByRole('button', { name: b }).waitFor();
+  await p.getByRole('button', { name: 'Simular outra divisão' }).click();
+  await p.getByRole('radio', { name: 'Guardar mais' }).click();
   await shot(p, '01-inicio-celular');
 
   // ---------- gasto com categoria criada na hora + desfazer
@@ -154,17 +158,29 @@ try {
 
   // ---------- organizar meu dinheiro
   await p.goto(`${BASE}/#/plano/organizar`);
-  await p.getByText('Disponível para distribuir').waitFor();
+  await p.getByText('Pode dividir').first().waitFor();
+  // pergunta prática para uma categoria sem histórico
+  await p.getByRole('button', { name: /Me ajude a estimar/ }).click();
+  const q1 = p.locator('.budget-row', { hasText: 'Namoro e passeios' }).first();
+  await q1.locator('.money-input input').fill('30');
+  await q1.getByRole('button', { name: 'Usar esta estimativa' }).click();
+  await p.waitForTimeout(600);
+  d = await data(p);
+  assert.equal(d.categories.find((c) => c.name === 'Namoro e passeios').estimate_weekly_cents, 3000);
+  await p.locator('.budget-row', { hasText: 'Namoro e passeios' }).getByText('estimativa sua').first().waitFor();
   await shot(p, '06-organizar');
   const valInput = p.getByLabel('Valor para Namorada');
   await valInput.fill('40');
   await valInput.press('Enter');
   await p.waitForTimeout(300);
   assert.equal(await p.locator('.budget-row', { hasText: 'Namorada' }).getByRole('button', { name: /Fixado/ }).count(), 1);
-  await p.getByRole('button', { name: 'Revisar e salvar plano' }).click();
+  await p.getByRole('button', { name: 'Aplicar plano' }).click();
   await shot(p, '07-confirmar-plano');
-  await p.getByRole('button', { name: 'Confirmar e salvar' }).click();
-  await p.waitForTimeout(800);
+  await p.getByRole('button', { name: 'Confirmar' }).click();
+  await p.getByText('Seu dinheiro foi dividido').waitFor();
+  await shot(p, '07b-dividido');
+  await p.getByRole('button', { name: 'Pronto' }).click();
+  await p.waitForTimeout(500);
   d = await data(p);
   assert.ok(d.plan, 'plano salvo');
   const planTotal = d.plan.items.reduce((s, i) => s + i.amount_cents, 0);
@@ -197,21 +213,49 @@ try {
   assert.match(result.fimDeSemana, /R\$/);
   await p.getByRole('listitem').filter({ hasText: 'Recebi R$' }).click();
   await p.getByLabel('Valor').fill('100');
-  await p.getByRole('button', { name: 'Registrar e separar' }).click();
+  await p.getByRole('button', { name: 'Registrar entrada e atualizar plano' }).click();
   await shot(p, '09-assistente-previa');
   const recBefore = (await data(p)).transactions.filter((t) => t.kind === 'receita').length;
+  const planBefore = (await data(p)).plan;
   await p.getByRole('button', { name: 'Confirmar' }).click();
-  await p.waitForTimeout(700);
-  assert.equal((await data(p)).transactions.filter((t) => t.kind === 'receita').length, recBefore + 1);
+  await p.waitForTimeout(900);
+  d = await data(p);
+  assert.equal(d.transactions.filter((t) => t.kind === 'receita').length, recBefore + 1);
+  const sumPlan = (pl) => pl.items.reduce((s, i) => s + i.amount_cents, 0);
+  assert.ok(sumPlan(d.plan) - sumPlan(planBefore) <= 10000, 'só os R$ 100 novos foram divididos');
+  assert.equal(d.plan.items.find((i) => i.ref_id === namorada.id).amount_cents, 4000, 'não reservou de novo');
+  assert.ok(sumPlan(d.plan) <= d.plan.available_cents, 'plano cabe no disponível');
+  // Uber sem histórico: pergunta viagens × custo
+  await p.getByRole('listitem').filter({ hasText: 'Uber' }).click();
+  await p.getByLabel(/Viagens de .* por semana/).fill('4');
+  await p.locator('.answer .money-input input').fill('15');
+  await p.getByRole('button', { name: 'Usar esta estimativa' }).click();
+  await p.locator('.answer .main').waitFor();
+  result.uber = await p.locator('.answer .main').textContent();
+  assert.match(result.uber, /R\$/);
+  await p.getByText('A IA ainda não está conectada', { exact: false }).waitFor();
   await p.getByRole('listitem').filter({ hasText: 'namorada' }).click();
   await p.locator('.answer .main').waitFor();
   result.namorada = await p.locator('.answer .main').textContent();
 
+  // ---------- valor pequeno pelo botão +: divide só o dinheiro novo
+  await p.goto(`${BASE}/#/inicio`);
+  await p.getByRole('button', { name: /Registrar entrada, gasto/ }).click();
+  await p.getByRole('button', { name: /Entrada/ }).first().click();
+  await modal(p).locator('.money-input input').first().fill('8');
+  await p.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await p.getByText('Como dividir esse dinheiro').waitFor();
+  await shot(p, '09b-dividir-entrada');
+  await modal(p).getByRole('button', { name: /^(Confirmar divisão|Ok)$/ }).click();
+  await p.waitForTimeout(700);
+  d = await data(p);
+  assert.ok(d.plan.items.reduce((s, i) => s + i.amount_cents, 0) <= d.plan.available_cents, 'plano ainda cabe');
+
   // ---------- plano desatualizado depois da entrada nova: recalcular pede confirmação
   await p.goto(`${BASE}/#/plano/organizar`);
-  await p.getByText('Seu plano salvo está desatualizado', { exact: false }).waitFor();
+  await p.getByText('Pode dividir').first().waitFor();
   const planId = (await data(p)).plan.id;
-  await p.getByRole('button', { name: 'Revisar e salvar plano' }).click();
+  await p.getByRole('button', { name: 'Aplicar plano' }).click();
   await p.getByText('Isto substitui o plano salvo', { exact: false }).waitFor();
   await closeModals(p);
   assert.equal((await data(p)).plan.id, planId, 'não substituiu sem confirmar');
@@ -226,9 +270,9 @@ try {
   await p.getByLabel('Nome de usuário').fill(USER);
   await p.getByLabel('Senha', { exact: true }).fill(PASS);
   await p.getByRole('button', { name: 'Entrar' }).click();
-  await p.getByText('Posso gastar').first().waitFor();
+  await p.locator('#pode-h').waitFor();
   d = await data(p);
-  assert.ok(d.plan && d.categories.some((c) => c.name === 'Namorada'), 'dados mantidos após sair e entrar');
+  assert.ok(d.plan && d.categories.some((c) => c.name === 'Namorada'), 'dados mantidos após sair e entrar: ' + JSON.stringify(d).slice(0, 300));
 
   // ---------- iPad e computador (outro aparelho)
   for (const [label, ctxOpts] of [['ipad', devices['iPad (gen 7)']], ['desktop', { viewport: { width: 1366, height: 900 } }]]) {
@@ -239,7 +283,7 @@ try {
     await q.getByLabel('Nome de usuário').fill(USER.toUpperCase());
     await q.getByLabel('Senha', { exact: true }).fill(PASS);
     await q.getByRole('button', { name: 'Entrar' }).click();
-    await q.getByText('Posso gastar').first().waitFor();
+    await q.locator('#pode-h').waitFor();
     result[`overflow_${label}`] = await overflowAll(q, `11-${label}`);
     await ctx.close();
   }

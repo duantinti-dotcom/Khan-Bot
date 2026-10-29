@@ -4,7 +4,7 @@ import { post, put } from '../api.js';
 import { Modal, Field, MoneyInput, inputToCents, centsToInput, Seg, brl, useSubmit, useToast, EmptyCta } from '../ui.jsx';
 
 export const ICONS = ['💞', '🌹', '🛴', '🚗', '🚌', '🍽️', '🍔', '☕', '🛒', '🤖', '📱', '🎮', '🎬', '🎉', '🛍️', '👕', '📚', '🎓', '🩺', '💊', '🏋️', '✂️', '🎁', '🐶', '🏠', '💡', '✈️', '⚽', '🎵', '•'];
-export const COLORS = ['#22d3ee', '#34d399', '#60a5fa', '#818cf8', '#a78bfa', '#f472b6', '#f87171', '#fb923c', '#fbbf24', '#a3e635', '#94a3b8'];
+export const COLORS = ['#2347c6', '#3f7d6e', '#5b8bb5', '#7468a8', '#a3648b', '#c0675a', '#c48a3c', '#8a9a4a', '#4f9aa0', '#8b6f5a', '#7c7f88'];
 
 // Formulário de categoria. Usado no perfil e direto no registro de um gasto.
 export function CategoryForm({ category, onClose, onSaved }) {
@@ -82,7 +82,7 @@ export default function Categorias() {
         <p className="muted" style={{ flex: 1 }}>Crie quantas precisar. A ordem aqui é a ordem nos formulários.</p>
         <button className="btn primary" onClick={() => setEdit({})}>+ Nova categoria</button>
       </div>
-      {!active.length && <EmptyCta icon="🗂️" title="Nenhuma categoria ativa" action={<button className="btn primary" onClick={() => setEdit({})}>Criar categoria</button>} />}
+      {!active.length && <EmptyCta icon="categorias" title="Nenhuma categoria ativa" action={<button className="btn primary" onClick={() => setEdit({})}>Criar categoria</button>} />}
       <div className="card">
         {active.map((c, i) => (
           <div className="item wrap-actions" key={c.id}>
