@@ -4,8 +4,8 @@
 // IA opcional: com o segredo ANTHROPIC_API_KEY configurado, o assistente usa o SDK oficial da Anthropic.
 import postgres from 'npm:postgres@3.4.5';
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { createApi, PG_TYPES } from 'https://cdn.jsdelivr.net/gh/duantinti-dotcom/Khan-Bot@f32e58de94b0944cd6f4c7cbc4fef0e8ae023894/planejador-financeiro/server/api.js';
-import { createAiAdvisor } from 'https://cdn.jsdelivr.net/gh/duantinti-dotcom/Khan-Bot@f32e58de94b0944cd6f4c7cbc4fef0e8ae023894/planejador-financeiro/server/ai.js';
+import { createApi, PG_TYPES } from 'https://cdn.jsdelivr.net/gh/duantinti-dotcom/Khan-Bot@788cb9353c989973f3ba01206b12b7327710c4e0/planejador-financeiro/server/api.js';
+import { createAiAdvisor } from 'https://cdn.jsdelivr.net/gh/duantinti-dotcom/Khan-Bot@788cb9353c989973f3ba01206b12b7327710c4e0/planejador-financeiro/server/ai.js';
 
 const sql = postgres(Deno.env.get('SUPABASE_DB_URL')!, {
   types: PG_TYPES,
