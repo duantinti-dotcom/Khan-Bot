@@ -44,3 +44,12 @@ npm run test:e2e -- http://localhost:8787 ./shots   # navegador (Playwright)
 3. Publicar este diretório no Vercel (`vercel.json` define build e o repasse de `/api`).
 
 Fórmulas: [docs/FORMULAS.md](docs/FORMULAS.md).
+
+## Publicação atual
+
+- Site: https://orbita-planejador.vercel.app (projeto Vercel `orbita-planejador`, time `lume-studio`).
+- `deploy/vercel/` contém exatamente os arquivos enviados ao Vercel: a página carrega o JS/CSS compilados
+  (`web/dist`, versionados neste repositório) pelo jsDelivr, fixados por commit e com hash de integridade (SRI).
+  Isso é necessário porque a conta Vercel ainda não está conectada ao GitHub; conectando, dá para usar o
+  `vercel.json` da raiz e compilar no próprio Vercel.
+- API: Edge Function `fin-api` no projeto Supabase `uzrsxpvpbfjmfipciylj`, esquema isolado `fin`.
